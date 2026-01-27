@@ -45,6 +45,16 @@ module JustYAML
         scan_document_end_or_scalar
       when '%'
         scan_directive
+      when '['
+        scan_sequence_start
+      when ']'
+        scan_sequence_end
+      when '{'
+        scan_mapping_start
+      when '}'
+        scan_mapping_end
+      when ','
+        scan_flow_separator
       else
         scan_scalar
       end
@@ -349,7 +359,8 @@ module JustYAML
     end
 
     private def scalar_terminator?(char : Char) : Bool
-      char == '\n' || char == ':'
+      char == '\n' || char == ':' || char == ',' ||
+        char == '[' || char == ']' || char == '{' || char == '}'
     end
 
     private def scan_comment : Token
@@ -444,6 +455,36 @@ module JustYAML
 
     private def tag_terminator?(char : Char) : Bool
       char == ' ' || char == '\t' || char == '\n' || char == ':'
+    end
+
+    private def scan_sequence_start : Token
+      loc = current_location
+      advance
+      Token.new(TokenType::SequenceStart, "[", loc)
+    end
+
+    private def scan_sequence_end : Token
+      loc = current_location
+      advance
+      Token.new(TokenType::SequenceEnd, "]", loc)
+    end
+
+    private def scan_mapping_start : Token
+      loc = current_location
+      advance
+      Token.new(TokenType::MappingStart, "{", loc)
+    end
+
+    private def scan_mapping_end : Token
+      loc = current_location
+      advance
+      Token.new(TokenType::MappingEnd, "}", loc)
+    end
+
+    private def scan_flow_separator : Token
+      loc = current_location
+      advance
+      Token.new(TokenType::FlowSeparator, ",", loc)
     end
   end
 end

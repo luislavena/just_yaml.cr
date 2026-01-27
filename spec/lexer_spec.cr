@@ -1203,4 +1203,216 @@ describe JustYAML::Lexer do
       end
     end
   end
+
+  describe "flow collection indicators" do
+    describe "sequence start ([)" do
+      it "scans sequence start" do
+        lexer = JustYAML::Lexer.new("[")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::SequenceStart)
+        token.value.should eq("[")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans sequence start with content" do
+        lexer = JustYAML::Lexer.new("[item]")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+        token3 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::SequenceStart)
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("item")
+        token3.type.should eq(JustYAML::TokenType::SequenceEnd)
+      end
+    end
+
+    describe "sequence end (])" do
+      it "scans sequence end" do
+        lexer = JustYAML::Lexer.new("]")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::SequenceEnd)
+        token.value.should eq("]")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+    end
+
+    describe "mapping start ({)" do
+      it "scans mapping start" do
+        lexer = JustYAML::Lexer.new("{")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::MappingStart)
+        token.value.should eq("{")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans mapping start with content" do
+        lexer = JustYAML::Lexer.new("{key: value}")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+        token3 = lexer.next_token
+        token4 = lexer.next_token
+        token5 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::MappingStart)
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("key")
+        token3.type.should eq(JustYAML::TokenType::ValueIndicator)
+        token4.type.should eq(JustYAML::TokenType::Scalar)
+        token4.value.should eq("value")
+        token5.type.should eq(JustYAML::TokenType::MappingEnd)
+      end
+    end
+
+    describe "mapping end (})" do
+      it "scans mapping end" do
+        lexer = JustYAML::Lexer.new("}")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::MappingEnd)
+        token.value.should eq("}")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+    end
+
+    describe "flow separator (,)" do
+      it "scans flow separator" do
+        lexer = JustYAML::Lexer.new(",")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::FlowSeparator)
+        token.value.should eq(",")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans flow separator between sequence items" do
+        lexer = JustYAML::Lexer.new("[a, b, c]")
+        lexer.next_token          # StreamStart
+        token1 = lexer.next_token # [
+        token2 = lexer.next_token # a
+        token3 = lexer.next_token # ,
+        token4 = lexer.next_token # b
+        token5 = lexer.next_token # ,
+        token6 = lexer.next_token # c
+        token7 = lexer.next_token # ]
+
+        token1.type.should eq(JustYAML::TokenType::SequenceStart)
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("a")
+        token3.type.should eq(JustYAML::TokenType::FlowSeparator)
+        token4.type.should eq(JustYAML::TokenType::Scalar)
+        token4.value.should eq("b")
+        token5.type.should eq(JustYAML::TokenType::FlowSeparator)
+        token6.type.should eq(JustYAML::TokenType::Scalar)
+        token6.value.should eq("c")
+        token7.type.should eq(JustYAML::TokenType::SequenceEnd)
+      end
+
+      it "scans flow separator between mapping pairs" do
+        lexer = JustYAML::Lexer.new("{a: 1, b: 2}")
+        lexer.next_token          # StreamStart
+        token1 = lexer.next_token # {
+        token2 = lexer.next_token # a
+        token3 = lexer.next_token # :
+        token4 = lexer.next_token # 1
+        token5 = lexer.next_token # ,
+        token6 = lexer.next_token # b
+        token7 = lexer.next_token # :
+        token8 = lexer.next_token # 2
+        token9 = lexer.next_token # }
+
+        token1.type.should eq(JustYAML::TokenType::MappingStart)
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("a")
+        token3.type.should eq(JustYAML::TokenType::ValueIndicator)
+        token4.type.should eq(JustYAML::TokenType::Scalar)
+        token4.value.should eq("1")
+        token5.type.should eq(JustYAML::TokenType::FlowSeparator)
+        token6.type.should eq(JustYAML::TokenType::Scalar)
+        token6.value.should eq("b")
+        token7.type.should eq(JustYAML::TokenType::ValueIndicator)
+        token8.type.should eq(JustYAML::TokenType::Scalar)
+        token8.value.should eq("2")
+        token9.type.should eq(JustYAML::TokenType::MappingEnd)
+      end
+    end
+
+    describe "nested flow collections" do
+      it "scans nested sequence" do
+        lexer = JustYAML::Lexer.new("[[a]]")
+        lexer.next_token          # StreamStart
+        token1 = lexer.next_token # [
+        token2 = lexer.next_token # [
+        token3 = lexer.next_token # a
+        token4 = lexer.next_token # ]
+        token5 = lexer.next_token # ]
+
+        token1.type.should eq(JustYAML::TokenType::SequenceStart)
+        token2.type.should eq(JustYAML::TokenType::SequenceStart)
+        token3.type.should eq(JustYAML::TokenType::Scalar)
+        token3.value.should eq("a")
+        token4.type.should eq(JustYAML::TokenType::SequenceEnd)
+        token5.type.should eq(JustYAML::TokenType::SequenceEnd)
+      end
+
+      it "scans sequence containing mapping" do
+        lexer = JustYAML::Lexer.new("[{a: 1}]")
+        lexer.next_token          # StreamStart
+        token1 = lexer.next_token # [
+        token2 = lexer.next_token # {
+        token3 = lexer.next_token # a
+        token4 = lexer.next_token # :
+        token5 = lexer.next_token # 1
+        token6 = lexer.next_token # }
+        token7 = lexer.next_token # ]
+
+        token1.type.should eq(JustYAML::TokenType::SequenceStart)
+        token2.type.should eq(JustYAML::TokenType::MappingStart)
+        token3.type.should eq(JustYAML::TokenType::Scalar)
+        token4.type.should eq(JustYAML::TokenType::ValueIndicator)
+        token5.type.should eq(JustYAML::TokenType::Scalar)
+        token6.type.should eq(JustYAML::TokenType::MappingEnd)
+        token7.type.should eq(JustYAML::TokenType::SequenceEnd)
+      end
+
+      it "scans mapping containing sequence" do
+        lexer = JustYAML::Lexer.new("{a: [1, 2]}")
+        lexer.next_token          # StreamStart
+        token1 = lexer.next_token # {
+        token2 = lexer.next_token # a
+        token3 = lexer.next_token # :
+        token4 = lexer.next_token # [
+        token5 = lexer.next_token # 1
+        token6 = lexer.next_token # ,
+        token7 = lexer.next_token # 2
+        token8 = lexer.next_token # ]
+        token9 = lexer.next_token # }
+
+        token1.type.should eq(JustYAML::TokenType::MappingStart)
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token3.type.should eq(JustYAML::TokenType::ValueIndicator)
+        token4.type.should eq(JustYAML::TokenType::SequenceStart)
+        token5.type.should eq(JustYAML::TokenType::Scalar)
+        token6.type.should eq(JustYAML::TokenType::FlowSeparator)
+        token7.type.should eq(JustYAML::TokenType::Scalar)
+        token8.type.should eq(JustYAML::TokenType::SequenceEnd)
+        token9.type.should eq(JustYAML::TokenType::MappingEnd)
+      end
+    end
+  end
 end
