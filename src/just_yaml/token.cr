@@ -3,13 +3,33 @@ module JustYAML
     # Structure
     StreamStart
     StreamEnd
+    DocumentStart # ---
+    DocumentEnd   # ...
+    Indent        # Virtual token for increased indentation
+    Dedent        # Virtual token for decreased indentation
     Newline
 
     # Indicators
+    KeyIndicator   # ?
     ValueIndicator # :
+    SequenceEntry  # -
+    MappingStart   # {
+    MappingEnd     # }
+    SequenceStart  # [
+    SequenceEnd    # ]
+    FlowSeparator  # ,
 
     # Content
     Scalar
+    Anchor # &name
+    Alias  # *name
+    Tag    # !tag
+
+    # Comments
+    Comment # #...
+
+    # Directives
+    Directive # %YAML, %TAG
   end
 
   class Token
