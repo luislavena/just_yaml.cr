@@ -529,4 +529,385 @@ describe JustYAML::Lexer do
       token.value.should eq("key: value")
     end
   end
+
+  describe "comments" do
+    it "scans simple comment" do
+      lexer = JustYAML::Lexer.new("# this is a comment")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Comment)
+      token.value.should eq(" this is a comment")
+      token.location.line.should eq(1)
+      token.location.column.should eq(1)
+    end
+
+    it "scans empty comment" do
+      lexer = JustYAML::Lexer.new("#")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Comment)
+      token.value.should eq("")
+    end
+
+    it "scans comment followed by newline" do
+      lexer = JustYAML::Lexer.new("# comment\nnext")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Comment)
+      token1.value.should eq(" comment")
+      token2.type.should eq(JustYAML::TokenType::Newline)
+    end
+
+    it "scans comment with special characters" do
+      lexer = JustYAML::Lexer.new("# special: 'chars' \"here\" & * !")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Comment)
+      token.value.should eq(" special: 'chars' \"here\" & * !")
+    end
+  end
+
+  describe "anchors" do
+    it "scans simple anchor" do
+      lexer = JustYAML::Lexer.new("&myanchor")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Anchor)
+      token.value.should eq("myanchor")
+      token.location.line.should eq(1)
+      token.location.column.should eq(1)
+    end
+
+    it "scans anchor with underscore" do
+      lexer = JustYAML::Lexer.new("&my_anchor")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Anchor)
+      token.value.should eq("my_anchor")
+    end
+
+    it "scans anchor with hyphen" do
+      lexer = JustYAML::Lexer.new("&my-anchor")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Anchor)
+      token.value.should eq("my-anchor")
+    end
+
+    it "scans anchor with numbers" do
+      lexer = JustYAML::Lexer.new("&anchor123")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Anchor)
+      token.value.should eq("anchor123")
+    end
+
+    it "scans anchor starting with underscore" do
+      lexer = JustYAML::Lexer.new("&_private")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Anchor)
+      token.value.should eq("_private")
+    end
+
+    it "scans anchor followed by whitespace" do
+      lexer = JustYAML::Lexer.new("&anchor value")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Anchor)
+      token1.value.should eq("anchor")
+      token2.type.should eq(JustYAML::TokenType::Scalar)
+      token2.value.should eq("value")
+    end
+
+    it "raises error for anchor starting with digit" do
+      lexer = JustYAML::Lexer.new("&123abc")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Invalid anchor name/) do
+        lexer.next_token
+      end
+    end
+
+    it "raises error for empty anchor name" do
+      lexer = JustYAML::Lexer.new("& value")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Invalid anchor name/) do
+        lexer.next_token
+      end
+    end
+
+    it "raises error for anchor at end of input" do
+      lexer = JustYAML::Lexer.new("&")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Invalid anchor name/) do
+        lexer.next_token
+      end
+    end
+  end
+
+  describe "aliases" do
+    it "scans simple alias" do
+      lexer = JustYAML::Lexer.new("*myanchor")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Alias)
+      token.value.should eq("myanchor")
+      token.location.line.should eq(1)
+      token.location.column.should eq(1)
+    end
+
+    it "scans alias with underscore" do
+      lexer = JustYAML::Lexer.new("*my_alias")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Alias)
+      token.value.should eq("my_alias")
+    end
+
+    it "scans alias with hyphen" do
+      lexer = JustYAML::Lexer.new("*my-alias")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Alias)
+      token.value.should eq("my-alias")
+    end
+
+    it "scans alias with numbers" do
+      lexer = JustYAML::Lexer.new("*alias123")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Alias)
+      token.value.should eq("alias123")
+    end
+
+    it "scans alias followed by whitespace" do
+      lexer = JustYAML::Lexer.new("*alias next")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Alias)
+      token1.value.should eq("alias")
+      token2.type.should eq(JustYAML::TokenType::Scalar)
+      token2.value.should eq("next")
+    end
+
+    it "raises error for alias starting with digit" do
+      lexer = JustYAML::Lexer.new("*123abc")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Invalid alias name/) do
+        lexer.next_token
+      end
+    end
+
+    it "raises error for empty alias name" do
+      lexer = JustYAML::Lexer.new("* value")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Invalid alias name/) do
+        lexer.next_token
+      end
+    end
+
+    it "raises error for alias at end of input" do
+      lexer = JustYAML::Lexer.new("*")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Invalid alias name/) do
+        lexer.next_token
+      end
+    end
+  end
+
+  describe "tags" do
+    it "scans non-specific tag (!)" do
+      lexer = JustYAML::Lexer.new("! value")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!")
+      token.location.line.should eq(1)
+      token.location.column.should eq(1)
+    end
+
+    it "scans local tag (!custom)" do
+      lexer = JustYAML::Lexer.new("!custom")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!custom")
+    end
+
+    it "scans secondary tag handle (!!str)" do
+      lexer = JustYAML::Lexer.new("!!str")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!!str")
+    end
+
+    it "scans secondary tag handle (!!int)" do
+      lexer = JustYAML::Lexer.new("!!int")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!!int")
+    end
+
+    it "scans secondary tag handle (!!map)" do
+      lexer = JustYAML::Lexer.new("!!map")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!!map")
+    end
+
+    it "scans secondary tag handle (!!seq)" do
+      lexer = JustYAML::Lexer.new("!!seq")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!!seq")
+    end
+
+    it "scans named tag handle (!prefix!suffix)" do
+      lexer = JustYAML::Lexer.new("!e!foo")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!e!foo")
+    end
+
+    it "scans verbatim tag (!<uri>)" do
+      lexer = JustYAML::Lexer.new("!<tag:yaml.org,2002:str>")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Tag)
+      token.value.should eq("!<tag:yaml.org,2002:str>")
+    end
+
+    it "scans tag followed by value" do
+      lexer = JustYAML::Lexer.new("!!str hello")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Tag)
+      token1.value.should eq("!!str")
+      token2.type.should eq(JustYAML::TokenType::Scalar)
+      token2.value.should eq("hello")
+    end
+
+    it "scans tag at end of line" do
+      lexer = JustYAML::Lexer.new("!!str\nvalue")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Tag)
+      token1.value.should eq("!!str")
+      token2.type.should eq(JustYAML::TokenType::Newline)
+    end
+
+    it "raises error for unterminated verbatim tag" do
+      lexer = JustYAML::Lexer.new("!<unclosed")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Unterminated verbatim tag/) do
+        lexer.next_token
+      end
+    end
+
+    it "raises error for verbatim tag with newline" do
+      lexer = JustYAML::Lexer.new("!<broken\ntag>")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Unterminated verbatim tag/) do
+        lexer.next_token
+      end
+    end
+  end
+
+  describe "combined usage" do
+    it "scans anchor followed by tag" do
+      lexer = JustYAML::Lexer.new("&anchor !!str")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Anchor)
+      token1.value.should eq("anchor")
+      token2.type.should eq(JustYAML::TokenType::Tag)
+      token2.value.should eq("!!str")
+    end
+
+    it "scans tag followed by anchor" do
+      lexer = JustYAML::Lexer.new("!!str &anchor")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Tag)
+      token1.value.should eq("!!str")
+      token2.type.should eq(JustYAML::TokenType::Anchor)
+      token2.value.should eq("anchor")
+    end
+
+    it "scans alias followed by comment" do
+      lexer = JustYAML::Lexer.new("*alias # a comment")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Alias)
+      token1.value.should eq("alias")
+      token2.type.should eq(JustYAML::TokenType::Comment)
+      token2.value.should eq(" a comment")
+    end
+
+    it "scans value with anchor and tag" do
+      lexer = JustYAML::Lexer.new(": &name !!str value")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+      token3 = lexer.next_token
+      token4 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::ValueIndicator)
+      token2.type.should eq(JustYAML::TokenType::Anchor)
+      token2.value.should eq("name")
+      token3.type.should eq(JustYAML::TokenType::Tag)
+      token3.value.should eq("!!str")
+      token4.type.should eq(JustYAML::TokenType::Scalar)
+      token4.value.should eq("value")
+    end
+  end
 end

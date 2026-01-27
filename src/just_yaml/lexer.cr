@@ -31,6 +31,14 @@ module JustYAML
         scan_single_quoted_scalar
       when '"'
         scan_double_quoted_scalar
+      when '#'
+        scan_comment
+      when '&'
+        scan_anchor
+      when '*'
+        scan_alias
+      when '!'
+        scan_tag
       else
         scan_scalar
       end
@@ -228,6 +236,100 @@ module JustYAML
 
     private def scalar_terminator?(char : Char) : Bool
       char == '\n' || char == ':'
+    end
+
+    private def scan_comment : Token
+      loc = current_location
+      advance # consume #
+
+      value = String.build do |str|
+        while !at_end? && current_char != '\n'
+          str << advance
+        end
+      end
+
+      Token.new(TokenType::Comment, value, loc)
+    end
+
+    private def scan_anchor : Token
+      loc = current_location
+      advance # consume &
+
+      name = scan_anchor_alias_name(loc, "anchor")
+
+      Token.new(TokenType::Anchor, name, loc)
+    end
+
+    private def scan_alias : Token
+      loc = current_location
+      advance # consume *
+
+      name = scan_anchor_alias_name(loc, "alias")
+
+      Token.new(TokenType::Alias, name, loc)
+    end
+
+    private def scan_anchor_alias_name(loc : Location, kind : String) : String
+      if at_end? || !valid_anchor_alias_start?(current_char)
+        raise LexerError.new("Invalid #{kind} name: must start with a letter or underscore", loc)
+      end
+
+      String.build do |str|
+        while !at_end? && valid_anchor_alias_char?(current_char)
+          str << advance
+        end
+      end
+    end
+
+    private def valid_anchor_alias_start?(char : Char) : Bool
+      char.ascii_letter? || char == '_'
+    end
+
+    private def valid_anchor_alias_char?(char : Char) : Bool
+      char.ascii_alphanumeric? || char == '-' || char == '_'
+    end
+
+    private def scan_tag : Token
+      loc = current_location
+      advance # consume first !
+
+      value = String.build do |str|
+        str << '!'
+
+        if at_end? || tag_terminator?(current_char)
+          # Just "!" - non-specific tag
+        elsif current_char == '!'
+          # Secondary tag handle: !!type
+          str << advance
+          while !at_end? && !tag_terminator?(current_char)
+            str << advance
+          end
+        elsif current_char == '<'
+          # Verbatim tag: !<uri>
+          str << advance
+          while !at_end? && current_char != '>'
+            if current_char == '\n'
+              raise LexerError.new("Unterminated verbatim tag", loc)
+            end
+            str << advance
+          end
+          if at_end?
+            raise LexerError.new("Unterminated verbatim tag", loc)
+          end
+          str << advance # consume >
+        else
+          # Local tag (!type) or named tag handle (!prefix!suffix)
+          while !at_end? && !tag_terminator?(current_char)
+            str << advance
+          end
+        end
+      end
+
+      Token.new(TokenType::Tag, value, loc)
+    end
+
+    private def tag_terminator?(char : Char) : Bool
+      char == ' ' || char == '\t' || char == '\n' || char == ':'
     end
   end
 end
