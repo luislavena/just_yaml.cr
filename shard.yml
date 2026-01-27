@@ -1,0 +1,9 @@
+name: just_yaml
+version: 0.1.0
+
+authors:
+  - Luis Lavena
+
+crystal: ">= 1.16.0"
+
+license: MIT
