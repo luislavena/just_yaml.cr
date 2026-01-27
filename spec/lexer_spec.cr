@@ -910,4 +910,297 @@ describe JustYAML::Lexer do
       token4.value.should eq("value")
     end
   end
+
+  describe "document markers" do
+    describe "document start (---)" do
+      it "scans document start at beginning of input" do
+        lexer = JustYAML::Lexer.new("---")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::DocumentStart)
+        token.value.should eq("---")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans document start followed by newline" do
+        lexer = JustYAML::Lexer.new("---\nkey: value")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::DocumentStart)
+        token1.value.should eq("---")
+        token2.type.should eq(JustYAML::TokenType::Newline)
+      end
+
+      it "scans document start followed by content on same line" do
+        lexer = JustYAML::Lexer.new("--- !tag value")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+        token3 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::DocumentStart)
+        token1.value.should eq("---")
+        token2.type.should eq(JustYAML::TokenType::Tag)
+        token2.value.should eq("!tag")
+        token3.type.should eq(JustYAML::TokenType::Scalar)
+        token3.value.should eq("value")
+      end
+
+      it "scans document start at beginning of new line" do
+        lexer = JustYAML::Lexer.new("key: value\n---")
+        lexer.next_token # StreamStart
+        lexer.next_token # Scalar (key)
+        lexer.next_token # ValueIndicator
+        lexer.next_token # Scalar (value)
+        lexer.next_token # Newline
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::DocumentStart)
+        token.value.should eq("---")
+      end
+    end
+
+    describe "document end (...)" do
+      it "scans document end at beginning of input" do
+        lexer = JustYAML::Lexer.new("...")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::DocumentEnd)
+        token.value.should eq("...")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans document end followed by newline" do
+        lexer = JustYAML::Lexer.new("...\n---")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::DocumentEnd)
+        token1.value.should eq("...")
+        token2.type.should eq(JustYAML::TokenType::Newline)
+      end
+
+      it "scans document end at end of document" do
+        lexer = JustYAML::Lexer.new("key: value\n...")
+        lexer.next_token # StreamStart
+        lexer.next_token # Scalar (key)
+        lexer.next_token # ValueIndicator
+        lexer.next_token # Scalar (value)
+        lexer.next_token # Newline
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::DocumentEnd)
+        token.value.should eq("...")
+      end
+
+      it "scans document end followed by space" do
+        lexer = JustYAML::Lexer.new("... ")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::DocumentEnd)
+        token.value.should eq("...")
+      end
+
+      it "treats ... with trailing content as scalar" do
+        lexer = JustYAML::Lexer.new("...text")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Scalar)
+        token.value.should eq("...text")
+      end
+
+      it "treats ... not at column 1 as scalar" do
+        lexer = JustYAML::Lexer.new("key: ...")
+        lexer.next_token # StreamStart
+        lexer.next_token # Scalar (key)
+        lexer.next_token # ValueIndicator
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Scalar)
+        token.value.should eq("...")
+      end
+    end
+
+    describe "sequence entry (-)" do
+      it "scans sequence entry followed by space" do
+        lexer = JustYAML::Lexer.new("- item")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::SequenceEntry)
+        token1.value.should eq("-")
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("item")
+      end
+
+      it "scans sequence entry followed by newline" do
+        lexer = JustYAML::Lexer.new("-\n  nested")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::SequenceEntry)
+        token1.value.should eq("-")
+        token2.type.should eq(JustYAML::TokenType::Newline)
+      end
+
+      it "scans sequence entry at end of input" do
+        lexer = JustYAML::Lexer.new("-")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::SequenceEntry)
+        token.value.should eq("-")
+      end
+
+      it "treats hyphen in scalar as part of scalar" do
+        lexer = JustYAML::Lexer.new("-123")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Scalar)
+        token.value.should eq("-123")
+      end
+
+      it "treats hyphenated-word as scalar" do
+        lexer = JustYAML::Lexer.new("-word")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Scalar)
+        token.value.should eq("-word")
+      end
+
+      it "distinguishes -- from document start" do
+        lexer = JustYAML::Lexer.new("--")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Scalar)
+        token.value.should eq("--")
+      end
+    end
+
+    describe "multiple documents" do
+      it "scans multiple documents" do
+        lexer = JustYAML::Lexer.new("---\ndoc1\n...\n---\ndoc2")
+        lexer.next_token # StreamStart
+
+        token1 = lexer.next_token
+        token1.type.should eq(JustYAML::TokenType::DocumentStart)
+
+        lexer.next_token # Newline
+        lexer.next_token # Scalar (doc1)
+        lexer.next_token # Newline
+
+        token2 = lexer.next_token
+        token2.type.should eq(JustYAML::TokenType::DocumentEnd)
+
+        lexer.next_token # Newline
+
+        token3 = lexer.next_token
+        token3.type.should eq(JustYAML::TokenType::DocumentStart)
+      end
+    end
+  end
+
+  describe "directives" do
+    describe "YAML directive" do
+      it "scans YAML directive" do
+        lexer = JustYAML::Lexer.new("%YAML 1.2")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Directive)
+        token.value.should eq("%YAML 1.2")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans YAML 1.1 directive" do
+        lexer = JustYAML::Lexer.new("%YAML 1.1")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Directive)
+        token.value.should eq("%YAML 1.1")
+      end
+
+      it "scans YAML directive followed by document start" do
+        lexer = JustYAML::Lexer.new("%YAML 1.2\n---")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+        token3 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::Directive)
+        token1.value.should eq("%YAML 1.2")
+        token2.type.should eq(JustYAML::TokenType::Newline)
+        token3.type.should eq(JustYAML::TokenType::DocumentStart)
+      end
+    end
+
+    describe "TAG directive" do
+      it "scans TAG directive" do
+        lexer = JustYAML::Lexer.new("%TAG !e! http://example.com/")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Directive)
+        token.value.should eq("%TAG !e! http://example.com/")
+      end
+
+      it "scans TAG directive with yaml.org prefix" do
+        lexer = JustYAML::Lexer.new("%TAG !! tag:yaml.org,2002:")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Directive)
+        token.value.should eq("%TAG !! tag:yaml.org,2002:")
+      end
+
+      it "scans multiple directives" do
+        lexer = JustYAML::Lexer.new("%YAML 1.2\n%TAG !e! http://example.com/\n---")
+        lexer.next_token # StreamStart
+
+        token1 = lexer.next_token
+        token1.type.should eq(JustYAML::TokenType::Directive)
+        token1.value.should eq("%YAML 1.2")
+
+        lexer.next_token # Newline
+
+        token2 = lexer.next_token
+        token2.type.should eq(JustYAML::TokenType::Directive)
+        token2.value.should eq("%TAG !e! http://example.com/")
+
+        lexer.next_token # Newline
+
+        token3 = lexer.next_token
+        token3.type.should eq(JustYAML::TokenType::DocumentStart)
+      end
+    end
+
+    describe "directive position" do
+      it "treats % not at column 1 as scalar" do
+        lexer = JustYAML::Lexer.new("key: %value")
+        lexer.next_token # StreamStart
+        lexer.next_token # Scalar (key)
+        lexer.next_token # ValueIndicator
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::Scalar)
+        token.value.should eq("%value")
+      end
+    end
+  end
 end

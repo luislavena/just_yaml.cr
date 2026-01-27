@@ -39,6 +39,12 @@ module JustYAML
         scan_alias
       when '!'
         scan_tag
+      when '-'
+        scan_document_start_or_sequence_entry
+      when '.'
+        scan_document_end_or_scalar
+      when '%'
+        scan_directive
       else
         scan_scalar
       end
@@ -232,6 +238,114 @@ module JustYAML
       end
 
       codepoint.chr
+    end
+
+    private def scan_document_start_or_sequence_entry : Token
+      loc = current_location
+
+      # Check if we're at column 1 (start of line) and might be ---
+      if @column == 1 && peek_next_chars_are?('-', '-')
+        # This is ---
+        advance # first -
+        advance # second -
+        advance # third -
+        Token.new(TokenType::DocumentStart, "---", loc)
+      else
+        # Single dash - could be sequence entry or part of a scalar
+        advance # consume the first -
+
+        if at_end? || current_char == ' ' || current_char == '\n' || current_char == '\t'
+          Token.new(TokenType::SequenceEntry, "-", loc)
+        else
+          # It's part of a scalar (e.g., "-123" or "-word")
+          # Continue reading the rest of the scalar
+          value = String.build do |str|
+            str << '-'
+            while !at_end? && !scalar_terminator?(current_char)
+              str << advance
+            end
+          end
+          Token.new(TokenType::Scalar, value.strip, loc)
+        end
+      end
+    end
+
+    private def scan_document_end_or_scalar : Token
+      loc = current_location
+
+      # Check if we're at column 1 (start of line) and have ...
+      if @column == 1 && peek_next_chars_are?('.', '.')
+        # Read all three dots
+        advance # first .
+        advance # second .
+        advance # third .
+
+        # Document end must be followed by whitespace, newline, or EOF
+        if at_end? || current_char == ' ' || current_char == '\t' || current_char == '\n'
+          Token.new(TokenType::DocumentEnd, "...", loc)
+        else
+          # Not a valid document end, treat as scalar
+          value = String.build do |str|
+            str << "..."
+            while !at_end? && !scalar_terminator?(current_char)
+              str << advance
+            end
+          end
+          Token.new(TokenType::Scalar, value.strip, loc)
+        end
+      else
+        # Just a regular scalar starting with .
+        scan_scalar
+      end
+    end
+
+    private def scan_directive : Token
+      loc = current_location
+
+      # Directives must be at the start of a line
+      if @column != 1
+        return scan_scalar
+      end
+
+      advance # consume %
+
+      value = String.build do |str|
+        str << '%'
+        while !at_end? && current_char != '\n'
+          str << advance
+        end
+      end
+
+      Token.new(TokenType::Directive, value.strip, loc)
+    end
+
+    # Check if next two characters (after current) match c1 and c2
+    private def peek_next_chars_are?(c1 : Char, c2 : Char) : Bool
+      return false unless @reader.has_next?
+
+      # Save current position
+      saved_pos = @reader.pos
+
+      # Move to next char and check if it matches c1
+      @reader.next_char
+      unless @reader.current_char == c1
+        @reader.pos = saved_pos
+        return false
+      end
+
+      # Check if there's another char and if it matches c2
+      unless @reader.has_next?
+        @reader.pos = saved_pos
+        return false
+      end
+
+      @reader.next_char
+      result = @reader.current_char == c2
+
+      # Restore position
+      @reader.pos = saved_pos
+
+      result
     end
 
     private def scalar_terminator?(char : Char) : Bool
