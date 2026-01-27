@@ -55,6 +55,8 @@ module JustYAML
         scan_mapping_end
       when ','
         scan_flow_separator
+      when '|', '>'
+        scan_block_scalar_indicator
       else
         scan_scalar
       end
@@ -485,6 +487,39 @@ module JustYAML
       loc = current_location
       advance
       Token.new(TokenType::FlowSeparator, ",", loc)
+    end
+
+    private def scan_block_scalar_indicator : Token
+      loc = current_location
+
+      value = String.build do |str|
+        # Read the indicator (| or >)
+        str << advance
+
+        # Read optional chomping indicator (+ or -) and/or indentation indicator (1-9)
+        # They can appear in either order: |+ |2 |+2 |2+
+        chomping_read = false
+        indent_read = false
+
+        2.times do
+          break if at_end?
+
+          case current_char
+          when '+', '-'
+            break if chomping_read
+            str << advance
+            chomping_read = true
+          when '1', '2', '3', '4', '5', '6', '7', '8', '9'
+            break if indent_read
+            str << advance
+            indent_read = true
+          else
+            break
+          end
+        end
+      end
+
+      Token.new(TokenType::BlockScalarHeader, value, loc)
     end
   end
 end

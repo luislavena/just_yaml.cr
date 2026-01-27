@@ -1415,4 +1415,205 @@ describe JustYAML::Lexer do
       end
     end
   end
+
+  describe "block scalar indicators" do
+    describe "literal block scalar (|)" do
+      it "scans simple literal indicator" do
+        lexer = JustYAML::Lexer.new("|")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans literal with strip chomping (-)" do
+        lexer = JustYAML::Lexer.new("|-")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|-")
+      end
+
+      it "scans literal with keep chomping (+)" do
+        lexer = JustYAML::Lexer.new("|+")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|+")
+      end
+
+      it "scans literal with indentation indicator" do
+        lexer = JustYAML::Lexer.new("|2")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|2")
+      end
+
+      it "scans literal with chomping and indentation (chomping first)" do
+        lexer = JustYAML::Lexer.new("|+2")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|+2")
+      end
+
+      it "scans literal with chomping and indentation (indentation first)" do
+        lexer = JustYAML::Lexer.new("|2+")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|2+")
+      end
+
+      it "scans literal with strip and indentation" do
+        lexer = JustYAML::Lexer.new("|-4")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq("|-4")
+      end
+
+      it "scans literal with indentation 1-9" do
+        (1..9).each do |n|
+          lexer = JustYAML::Lexer.new("|#{n}")
+          lexer.next_token # StreamStart
+          token = lexer.next_token
+
+          token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+          token.value.should eq("|#{n}")
+        end
+      end
+    end
+
+    describe "folded block scalar (>)" do
+      it "scans simple folded indicator" do
+        lexer = JustYAML::Lexer.new(">")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq(">")
+        token.location.line.should eq(1)
+        token.location.column.should eq(1)
+      end
+
+      it "scans folded with strip chomping (-)" do
+        lexer = JustYAML::Lexer.new(">-")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq(">-")
+      end
+
+      it "scans folded with keep chomping (+)" do
+        lexer = JustYAML::Lexer.new(">+")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq(">+")
+      end
+
+      it "scans folded with indentation indicator" do
+        lexer = JustYAML::Lexer.new(">2")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq(">2")
+      end
+
+      it "scans folded with chomping and indentation (chomping first)" do
+        lexer = JustYAML::Lexer.new(">-3")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq(">-3")
+      end
+
+      it "scans folded with chomping and indentation (indentation first)" do
+        lexer = JustYAML::Lexer.new(">3-")
+        lexer.next_token # StreamStart
+        token = lexer.next_token
+
+        token.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token.value.should eq(">3-")
+      end
+    end
+
+    describe "block scalar in context" do
+      it "scans block scalar header followed by newline" do
+        lexer = JustYAML::Lexer.new("|\n  content")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token1.value.should eq("|")
+        token2.type.should eq(JustYAML::TokenType::Newline)
+      end
+
+      it "scans block scalar header as value" do
+        lexer = JustYAML::Lexer.new("key: |")
+        lexer.next_token          # StreamStart
+        token1 = lexer.next_token # key
+        token2 = lexer.next_token # :
+        token3 = lexer.next_token # |
+
+        token1.type.should eq(JustYAML::TokenType::Scalar)
+        token1.value.should eq("key")
+        token2.type.should eq(JustYAML::TokenType::ValueIndicator)
+        token3.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token3.value.should eq("|")
+      end
+
+      it "scans block scalar header with comment" do
+        lexer = JustYAML::Lexer.new("|- # comment")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token1.value.should eq("|-")
+        token2.type.should eq(JustYAML::TokenType::Comment)
+      end
+
+      it "does not consume extra characters after indicator" do
+        lexer = JustYAML::Lexer.new("|text")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        token1.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token1.value.should eq("|")
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("text")
+      end
+
+      it "stops at invalid indicator characters" do
+        lexer = JustYAML::Lexer.new("|0")
+        lexer.next_token # StreamStart
+        token1 = lexer.next_token
+        token2 = lexer.next_token
+
+        # 0 is not a valid indentation indicator (only 1-9)
+        token1.type.should eq(JustYAML::TokenType::BlockScalarHeader)
+        token1.value.should eq("|")
+        token2.type.should eq(JustYAML::TokenType::Scalar)
+        token2.value.should eq("0")
+      end
+    end
+  end
 end

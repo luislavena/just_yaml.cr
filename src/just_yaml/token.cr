@@ -21,9 +21,10 @@ module JustYAML
 
     # Content
     Scalar
-    Anchor # &name
-    Alias  # *name
-    Tag    # !tag
+    BlockScalarHeader # | or > with optional modifiers
+    Anchor            # &name
+    Alias             # *name
+    Tag               # !tag
 
     # Comments
     Comment # #...
