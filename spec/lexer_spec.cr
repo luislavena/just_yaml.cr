@@ -146,3 +146,387 @@ describe JustYAML::Token do
     end
   end
 end
+
+describe JustYAML::Lexer do
+  describe "single-quoted strings" do
+    it "scans simple single-quoted string" do
+      lexer = JustYAML::Lexer.new("'hello'")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("hello")
+      token.location.line.should eq(1)
+      token.location.column.should eq(1)
+    end
+
+    it "scans single-quoted string with spaces" do
+      lexer = JustYAML::Lexer.new("'hello world'")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("hello world")
+    end
+
+    it "scans empty single-quoted string" do
+      lexer = JustYAML::Lexer.new("''")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("")
+    end
+
+    it "scans single-quoted string with escaped quote" do
+      lexer = JustYAML::Lexer.new("'it''s'")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("it's")
+    end
+
+    it "scans single-quoted string with multiple escaped quotes" do
+      lexer = JustYAML::Lexer.new("'it''s a ''test'''")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("it's a 'test'")
+    end
+
+    it "scans single-quoted string with special characters" do
+      lexer = JustYAML::Lexer.new("'hello\\nworld'")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      # In single-quoted strings, backslash is literal
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("hello\\nworld")
+    end
+
+    it "raises error for unterminated single-quoted string" do
+      lexer = JustYAML::Lexer.new("'hello")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Unterminated single-quoted string/) do
+        lexer.next_token
+      end
+    end
+
+    it "raises error for unterminated string with escaped quote at end" do
+      lexer = JustYAML::Lexer.new("'it''")
+      lexer.next_token # StreamStart
+
+      expect_raises(JustYAML::LexerError, /Unterminated single-quoted string/) do
+        lexer.next_token
+      end
+    end
+  end
+
+  describe "double-quoted strings" do
+    it "scans simple double-quoted string" do
+      lexer = JustYAML::Lexer.new("\"hello\"")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("hello")
+      token.location.line.should eq(1)
+      token.location.column.should eq(1)
+    end
+
+    it "scans double-quoted string with spaces" do
+      lexer = JustYAML::Lexer.new("\"hello world\"")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("hello world")
+    end
+
+    it "scans empty double-quoted string" do
+      lexer = JustYAML::Lexer.new("\"\"")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("")
+    end
+
+    describe "escape sequences" do
+      it "handles null escape (\\0)" do
+        lexer = JustYAML::Lexer.new("\"a\\0b\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\0b")
+      end
+
+      it "handles bell escape (\\a)" do
+        lexer = JustYAML::Lexer.new("\"a\\ab\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\ab")
+      end
+
+      it "handles backspace escape (\\b)" do
+        lexer = JustYAML::Lexer.new("\"a\\bb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\bb")
+      end
+
+      it "handles tab escape (\\t)" do
+        lexer = JustYAML::Lexer.new("\"a\\tb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\tb")
+      end
+
+      it "handles newline escape (\\n)" do
+        lexer = JustYAML::Lexer.new("\"hello\\nworld\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("hello\nworld")
+      end
+
+      it "handles vertical tab escape (\\v)" do
+        lexer = JustYAML::Lexer.new("\"a\\vb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\vb")
+      end
+
+      it "handles form feed escape (\\f)" do
+        lexer = JustYAML::Lexer.new("\"a\\fb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\fb")
+      end
+
+      it "handles carriage return escape (\\r)" do
+        lexer = JustYAML::Lexer.new("\"a\\rb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\rb")
+      end
+
+      it "handles escape escape (\\e)" do
+        lexer = JustYAML::Lexer.new("\"a\\eb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\eb")
+      end
+
+      it "handles space escape (\\ )" do
+        lexer = JustYAML::Lexer.new("\"a\\ b\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a b")
+      end
+
+      it "handles double quote escape (\\\")" do
+        lexer = JustYAML::Lexer.new("\"a\\\"b\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\"b")
+      end
+
+      it "handles slash escape (\\/)" do
+        lexer = JustYAML::Lexer.new("\"a\\/b\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a/b")
+      end
+
+      it "handles backslash escape (\\\\)" do
+        lexer = JustYAML::Lexer.new("\"a\\\\b\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\\b")
+      end
+
+      it "handles NEL escape (\\N)" do
+        lexer = JustYAML::Lexer.new("\"a\\Nb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\u0085b")
+      end
+
+      it "handles NBSP escape (\\_)" do
+        lexer = JustYAML::Lexer.new("\"a\\_b\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\u00A0b")
+      end
+
+      it "handles line separator escape (\\L)" do
+        lexer = JustYAML::Lexer.new("\"a\\Lb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\u2028b")
+      end
+
+      it "handles paragraph separator escape (\\P)" do
+        lexer = JustYAML::Lexer.new("\"a\\Pb\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("a\u2029b")
+      end
+
+      it "handles hex escape (\\xNN)" do
+        lexer = JustYAML::Lexer.new("\"\\x41\\x42\\x43\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("ABC")
+      end
+
+      it "handles unicode escape (\\uNNNN)" do
+        lexer = JustYAML::Lexer.new("\"\\u0048\\u0065\\u006C\\u006C\\u006F\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("Hello")
+      end
+
+      it "handles unicode escape for non-ASCII" do
+        lexer = JustYAML::Lexer.new("\"\\u4E2D\\u6587\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("\u4E2D\u6587") # Chinese characters
+      end
+
+      it "handles 8-digit unicode escape (\\UNNNNNNNN)" do
+        lexer = JustYAML::Lexer.new("\"\\U0001F600\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("\u{1F600}") # Emoji grinning face
+      end
+
+      it "handles multiple escape sequences" do
+        lexer = JustYAML::Lexer.new("\"line1\\nline2\\ttab\"")
+        lexer.next_token
+        token = lexer.next_token
+        token.value.should eq("line1\nline2\ttab")
+      end
+    end
+
+    describe "error handling" do
+      it "raises error for unterminated double-quoted string" do
+        lexer = JustYAML::Lexer.new("\"hello")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Unterminated double-quoted string/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for invalid escape sequence" do
+        lexer = JustYAML::Lexer.new("\"hello\\qworld\"")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Invalid escape sequence '\\q'/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for incomplete hex escape" do
+        # When hex escape is incomplete, the closing quote is hit as invalid hex
+        lexer = JustYAML::Lexer.new("\"\\x4\"")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Invalid hex digit/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for incomplete hex escape at end of input" do
+        lexer = JustYAML::Lexer.new("\"\\x4")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Incomplete hex escape sequence/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for invalid hex digit" do
+        lexer = JustYAML::Lexer.new("\"\\xGG\"")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Invalid hex digit 'G'/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for incomplete unicode escape" do
+        # When unicode escape is incomplete, the closing quote is hit as invalid hex
+        lexer = JustYAML::Lexer.new("\"\\u00\"")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Invalid hex digit/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for incomplete unicode escape at end of input" do
+        lexer = JustYAML::Lexer.new("\"\\u00")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Incomplete hex escape sequence/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for invalid unicode surrogate" do
+        lexer = JustYAML::Lexer.new("\"\\uD800\"")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Invalid Unicode surrogate codepoint/) do
+          lexer.next_token
+        end
+      end
+
+      it "raises error for unterminated escape at end of string" do
+        lexer = JustYAML::Lexer.new("\"hello\\")
+        lexer.next_token # StreamStart
+
+        expect_raises(JustYAML::LexerError, /Unterminated escape sequence/) do
+          lexer.next_token
+        end
+      end
+    end
+  end
+
+  describe "quoted strings in context" do
+    it "scans quoted string followed by newline" do
+      lexer = JustYAML::Lexer.new("'hello'\n")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::Scalar)
+      token1.value.should eq("hello")
+      token2.type.should eq(JustYAML::TokenType::Newline)
+    end
+
+    it "scans quoted string as value" do
+      lexer = JustYAML::Lexer.new(": 'value'")
+      lexer.next_token # StreamStart
+      token1 = lexer.next_token
+      token2 = lexer.next_token
+
+      token1.type.should eq(JustYAML::TokenType::ValueIndicator)
+      token2.type.should eq(JustYAML::TokenType::Scalar)
+      token2.value.should eq("value")
+    end
+
+    it "scans double-quoted string with colon inside" do
+      lexer = JustYAML::Lexer.new("\"key: value\"")
+      lexer.next_token # StreamStart
+      token = lexer.next_token
+
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("key: value")
+    end
+  end
+end
