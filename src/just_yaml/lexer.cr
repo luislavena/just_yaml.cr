@@ -685,9 +685,18 @@ module JustYAML
       loc = current_location
       advance # consume *
 
-      # * must be followed by valid alias name characters
+      # * followed by whitespace or flow indicator is not an alias - it's a literal * in content
+      # Only * followed by valid anchor/alias name characters is an alias
       if at_end? || !valid_anchor_alias_char?(current_char)
-        raise LexerError.new("Invalid alias name: must contain valid characters", loc)
+        # Not an alias - return * as a scalar
+        # Continue scanning the rest as a plain scalar
+        value = String.build do |str|
+          str << '*'
+          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
+            str << advance
+          end
+        end
+        return Token.new(TokenType::Scalar, value.strip, loc)
       end
 
       name = scan_anchor_alias_name(loc, "alias")
