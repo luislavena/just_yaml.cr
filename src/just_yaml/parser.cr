@@ -224,6 +224,61 @@ module JustYAML
 
     # Parse multiline plain scalar by checking for continuation lines
     private def parse_multiline_plain_scalar(first_scalar : AST::ScalarNode, min_indent : Int32) : AST::Node
+      fold_multiline_plain_scalar(first_scalar, min_indent: min_indent)
+    end
+
+    # Mode for multiline plain scalar parsing context
+    private enum MultilineScalarMode
+      Root     # Top-level or general block context
+      Sequence # Inside a block sequence item
+      Mapping  # Inside a block mapping value
+    end
+
+    # Build the final multiline plain scalar node from collected lines
+    private def build_multiline_plain_scalar(
+      lines : Array(String),
+      first_scalar : AST::ScalarNode,
+      end_location : Location,
+    ) : AST::ScalarNode
+      # Join with spaces, but preserve newlines from empty lines
+      result = String.build do |str|
+        lines.each_with_index do |line, idx|
+          if idx > 0 && !lines[idx - 1].ends_with?("\n") && !line.starts_with?("\n")
+            str << " "
+          end
+          str << line.gsub(/^\n+/) { |m| m } # Preserve leading newlines
+        end
+      end
+
+      scalar = AST::ScalarNode.new(result, AST::ScalarStyle::Plain)
+      scalar.start_location = first_scalar.start_location
+      scalar.end_location = end_location
+      scalar
+    end
+
+    # Append a continuation line to the lines array, handling empty line counts
+    private def append_continuation_line(
+      lines : Array(String),
+      line_content : String,
+      empty_line_count : Int32,
+    ) : Int32
+      if empty_line_count > 0
+        lines << "\n" * empty_line_count
+      end
+      lines << line_content
+      0 # Reset empty line count
+    end
+
+    # Shared helper for parsing multiline plain scalars across all contexts
+    # Returns the folded scalar node or the original if no continuation found
+    private def fold_multiline_plain_scalar(
+      first_scalar : AST::ScalarNode,
+      *,
+      mode : MultilineScalarMode = MultilineScalarMode::Root,
+      min_indent : Int32 = -1,
+      entry_indent : Int32 = -1,
+      key_indent : Int32 = -1,
+    ) : AST::Node
       # Only plain scalars can span multiple lines
       return first_scalar unless first_scalar.style == AST::ScalarStyle::Plain
 
@@ -238,7 +293,6 @@ module JustYAML
         # Track empty lines (they become newlines in folded text)
         while check(TokenType::Newline)
           advance
-          # Count empty lines for later
           if check(TokenType::Newline) || check(TokenType::StreamEnd)
             empty_line_count += 1
           end
@@ -257,18 +311,38 @@ module JustYAML
 
         # Check indentation of next content
         next_col = @current_token.location.column
-        break if next_col < scalar_indent
+
+        # Mode-specific indentation break conditions
+        case mode
+        when MultilineScalarMode::Root
+          break if next_col < scalar_indent
+        when MultilineScalarMode::Sequence
+          break if next_col <= entry_indent
+        when MultilineScalarMode::Mapping
+          break if next_col <= key_indent
+        end
+
+        # Sequence mode: check for continuation that looks like sequence entry
+        if mode == MultilineScalarMode::Sequence && check(TokenType::SequenceEntry)
+          # Could be nested sequence entry OR literal text
+          # If between entry_indent and scalar_indent, it's literal text
+          if next_col > entry_indent && next_col < scalar_indent
+            line_content = consume_sequence_like_continuation
+            if line_content
+              empty_line_count = append_continuation_line(lines, line_content, empty_line_count)
+              next
+            end
+          end
+          # Otherwise it's a real sequence entry, stop multiline
+          break
+        end
 
         # For continuation lines that are MORE indented, consume all tokens
         # as literal text (indicators become literal chars in this context)
         if next_col > scalar_indent
           line_content = consume_plain_scalar_continuation_line
           if line_content
-            if empty_line_count > 0
-              lines << "\n" * empty_line_count
-              empty_line_count = 0
-            end
-            lines << line_content
+            empty_line_count = append_continuation_line(lines, line_content, empty_line_count)
             next
           else
             break
@@ -292,31 +366,13 @@ module JustYAML
         end
 
         # Add this line as continuation
-        if empty_line_count > 0
-          lines << "\n" * empty_line_count
-          empty_line_count = 0
-        end
-        lines << next_scalar.value
+        empty_line_count = append_continuation_line(lines, next_scalar.value, empty_line_count)
       end
 
       # If no continuation, just return original scalar
       return first_scalar if lines.size == 1
 
-      # Build multiline scalar value
-      # Join with spaces, but preserve newlines from empty lines
-      result = String.build do |str|
-        lines.each_with_index do |line, idx|
-          if idx > 0 && !lines[idx - 1].ends_with?("\n") && !line.starts_with?("\n")
-            str << " "
-          end
-          str << line.gsub(/^\n+/) { |m| m } # Preserve leading newlines
-        end
-      end
-
-      scalar = AST::ScalarNode.new(result, AST::ScalarStyle::Plain)
-      scalar.start_location = first_scalar.start_location
-      scalar.end_location = @current_token.location
-      scalar
+      build_multiline_plain_scalar(lines, first_scalar, @current_token.location)
     end
 
     # Consume tokens on a continuation line and return as literal text
@@ -360,109 +416,7 @@ module JustYAML
     # Parse multiline plain scalar in sequence item context
     # Handles cases where continuation looks like a sequence entry
     private def parse_multiline_plain_scalar_in_sequence(first_scalar : AST::ScalarNode, entry_indent : Int32) : AST::Node
-      return first_scalar unless first_scalar.style == AST::ScalarStyle::Plain
-
-      scalar_indent = first_scalar.start_location.column
-      lines = [first_scalar.value]
-      empty_line_count = 0
-
-      loop do
-        break unless check(TokenType::Newline) || check(TokenType::Comment)
-
-        while check(TokenType::Newline)
-          advance
-          if check(TokenType::Newline) || check(TokenType::StreamEnd)
-            empty_line_count += 1
-          end
-        end
-
-        if check(TokenType::Comment)
-          advance
-          next
-        end
-
-        break if check(TokenType::StreamEnd) ||
-                 check(TokenType::DocumentStart) ||
-                 check(TokenType::DocumentEnd)
-
-        next_col = @current_token.location.column
-
-        # In sequence context, check if we've dedented back to sequence level or less
-        break if next_col <= entry_indent
-
-        # Check for continuation that looks like sequence entry but isn't
-        # (different column than the parent sequence)
-        if check(TokenType::SequenceEntry)
-          # This could be a nested sequence entry OR literal text
-          # If it's at a column between entry_indent and scalar_indent,
-          # it's literal text (continuation of the scalar)
-          if next_col > entry_indent && next_col < scalar_indent
-            # Consume this as literal text
-            line_content = consume_sequence_like_continuation
-            if line_content
-              if empty_line_count > 0
-                lines << "\n" * empty_line_count
-                empty_line_count = 0
-              end
-              lines << line_content
-              next
-            end
-          end
-          # Otherwise it's a real sequence entry, stop multiline
-          break
-        end
-
-        # More indented continuation
-        if next_col > scalar_indent
-          line_content = consume_plain_scalar_continuation_line
-          if line_content
-            if empty_line_count > 0
-              lines << "\n" * empty_line_count
-              empty_line_count = 0
-            end
-            lines << line_content
-            next
-          else
-            break
-          end
-        end
-
-        # Same indentation, must be scalar
-        break unless check(TokenType::Scalar)
-
-        saved_token = @current_token
-        next_scalar = parse_scalar
-        skip_whitespace_tokens
-
-        if check(TokenType::ValueIndicator)
-          raise ParseError.new(
-            "Cannot have mapping key after multiline scalar at same indentation",
-            saved_token.location
-          )
-        end
-
-        if empty_line_count > 0
-          lines << "\n" * empty_line_count
-          empty_line_count = 0
-        end
-        lines << next_scalar.value
-      end
-
-      return first_scalar if lines.size == 1
-
-      result = String.build do |str|
-        lines.each_with_index do |line, idx|
-          if idx > 0 && !lines[idx - 1].ends_with?("\n") && !line.starts_with?("\n")
-            str << " "
-          end
-          str << line.gsub(/^\n+/) { |m| m }
-        end
-      end
-
-      scalar = AST::ScalarNode.new(result, AST::ScalarStyle::Plain)
-      scalar.start_location = first_scalar.start_location
-      scalar.end_location = @current_token.location
-      scalar
+      fold_multiline_plain_scalar(first_scalar, mode: MultilineScalarMode::Sequence, entry_indent: entry_indent)
     end
 
     # Consume a continuation line that starts with what looks like sequence entry
@@ -507,88 +461,7 @@ module JustYAML
 
     # Parse multiline plain scalar in mapping value context
     private def parse_multiline_plain_scalar_in_mapping(first_scalar : AST::ScalarNode, key_indent : Int32) : AST::Node
-      return first_scalar unless first_scalar.style == AST::ScalarStyle::Plain
-
-      scalar_indent = first_scalar.start_location.column
-      lines = [first_scalar.value]
-      empty_line_count = 0
-
-      loop do
-        break unless check(TokenType::Newline) || check(TokenType::Comment)
-
-        while check(TokenType::Newline)
-          advance
-          if check(TokenType::Newline) || check(TokenType::StreamEnd)
-            empty_line_count += 1
-          end
-        end
-
-        if check(TokenType::Comment)
-          advance
-          next
-        end
-
-        break if check(TokenType::StreamEnd) ||
-                 check(TokenType::DocumentStart) ||
-                 check(TokenType::DocumentEnd)
-
-        next_col = @current_token.location.column
-
-        # Stop if we've dedented to key level or less (next mapping entry)
-        break if next_col <= key_indent
-
-        # More indented continuation - all tokens become literal text
-        if next_col > scalar_indent
-          line_content = consume_plain_scalar_continuation_line
-          if line_content
-            if empty_line_count > 0
-              lines << "\n" * empty_line_count
-              empty_line_count = 0
-            end
-            lines << line_content
-            next
-          else
-            break
-          end
-        end
-
-        # At same indentation as scalar start, must be a scalar
-        break unless check(TokenType::Scalar)
-
-        saved_token = @current_token
-        next_scalar = parse_scalar
-        skip_whitespace_tokens
-
-        if check(TokenType::ValueIndicator)
-          # This is a new mapping entry, not a continuation
-          raise ParseError.new(
-            "Cannot have mapping key after multiline scalar at same indentation",
-            saved_token.location
-          )
-        end
-
-        if empty_line_count > 0
-          lines << "\n" * empty_line_count
-          empty_line_count = 0
-        end
-        lines << next_scalar.value
-      end
-
-      return first_scalar if lines.size == 1
-
-      result = String.build do |str|
-        lines.each_with_index do |line, idx|
-          if idx > 0 && !lines[idx - 1].ends_with?("\n") && !line.starts_with?("\n")
-            str << " "
-          end
-          str << line.gsub(/^\n+/) { |m| m }
-        end
-      end
-
-      scalar = AST::ScalarNode.new(result, AST::ScalarStyle::Plain)
-      scalar.start_location = first_scalar.start_location
-      scalar.end_location = @current_token.location
-      scalar
+      fold_multiline_plain_scalar(first_scalar, mode: MultilineScalarMode::Mapping, key_indent: key_indent)
     end
 
     private def parse_block_mapping(first_key : AST::ScalarNode, min_indent : Int32) : AST::MappingNode
