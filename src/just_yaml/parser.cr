@@ -903,7 +903,11 @@ module JustYAML
     private def parse_explicit_key_value(key_indent : Int32) : AST::Node
       case @current_token.type
       when TokenType::Scalar
-        parse_scalar
+        # Parse scalar and check for multiline continuation
+        scalar = parse_scalar
+        skip_whitespace_tokens
+        # Check for multiline continuation (more-indented lines or same-indent without :)
+        fold_multiline_plain_scalar(scalar, mode: MultilineScalarMode::Mapping, key_indent: key_indent)
       when TokenType::SequenceStart
         parse_flow_sequence
       when TokenType::MappingStart
