@@ -1047,29 +1047,44 @@ module JustYAML
       result = String.build do |str|
         prev_empty = false
         prev_more_indented = false
+        had_content = false
+        had_regular_content = false # Track if we had non-more-indented content
 
         lines.each_with_index do |line, idx|
           # Skip trailing empty lines unless keeping
           next if idx > last_content_idx && chomping != :keep
 
           if line[:is_empty]
+            # Empty lines in folded scalars:
+            # - Preserve as newlines
             str << "\n"
             prev_empty = true
           else
             is_more_indented = line[:content].starts_with?(" ")
 
             # Add separator between content lines
-            if idx > 0 && !prev_empty
+            if had_content && !prev_empty
               if prev_more_indented || is_more_indented
                 str << "\n"
               else
                 str << " "
+              end
+            elsif prev_empty && had_content
+              # After empty line, add extra newline when:
+              # - Transitioning to more-indented from regular content
+              # - Transitioning from more-indented to regular content
+              if (had_regular_content && is_more_indented) || (prev_more_indented && !is_more_indented)
+                str << "\n"
               end
             end
 
             str << line[:content]
             prev_empty = false
             prev_more_indented = is_more_indented
+            had_content = true
+            if !is_more_indented
+              had_regular_content = true
+            end
           end
         end
 
