@@ -327,6 +327,72 @@ module JustYAML
       end
     end
 
+    # Parse a mapping where the first key is an already-resolved alias
+    private def parse_block_mapping_with_alias_key(first_key : AST::Node, key_indent : Int32) : AST::MappingNode
+      mapping = AST::MappingNode.new
+      mapping.start_location = first_key.start_location
+      mapping.style = AST::CollectionStyle::Block
+
+      key = first_key
+
+      loop do
+        expect(TokenType::ValueIndicator)
+        skip_whitespace_tokens
+
+        value = parse_mapping_value(key_indent)
+        mapping.entries << AST::MappingEntry.new(key: key, value: value)
+
+        skip_comments_and_newlines
+
+        # Check if we're done with this mapping
+        break if check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+
+        # Check indentation for next potential entry
+        next_col = @current_token.location.column
+        break if next_col < key_indent
+
+        # Parse next key - could be scalar or alias
+        case @current_token.type
+        when TokenType::Scalar
+          next_key_col = @current_token.location.column
+          break if next_key_col != key_indent
+
+          key = parse_scalar
+          skip_whitespace_tokens
+
+          unless check(TokenType::ValueIndicator)
+            break
+          end
+        when TokenType::Alias
+          next_key_col = @current_token.location.column
+          break if next_key_col != key_indent
+
+          alias_name = @current_token.value
+          alias_loc = @current_token.location
+          advance
+          skip_whitespace_tokens
+
+          resolved = @anchors[alias_name]?
+          unless resolved
+            raise ParseError.new("Unknown alias '#{alias_name}'", alias_loc)
+          end
+
+          key = resolved
+
+          unless check(TokenType::ValueIndicator)
+            break
+          end
+        else
+          break
+        end
+      end
+
+      mapping.end_location = @current_token.location
+      mapping
+    end
+
     private def parse_mapping_value(key_indent : Int32) : AST::Node?
       # Check for anchor/tag/alias on value
       anchor, tag, alias_node = parse_value_properties
@@ -444,6 +510,25 @@ module JustYAML
         parse_flow_sequence
       when TokenType::MappingStart
         parse_flow_mapping
+      when TokenType::Alias
+        # Alias can be a mapping key: *alias : value
+        alias_name = @current_token.value
+        alias_loc = @current_token.location
+        advance
+        skip_whitespace_tokens
+
+        resolved = @anchors[alias_name]?
+        unless resolved
+          raise ParseError.new("Unknown alias '#{alias_name}'", alias_loc)
+        end
+
+        if check(TokenType::ValueIndicator)
+          # Alias is a mapping key - create a mapping with it
+          parse_block_mapping_with_alias_key(resolved, next_col)
+        else
+          # Just an alias value
+          resolved
+        end
       when TokenType::Anchor
         # Anchor on nested content
         nested_anchor = @current_token.value
