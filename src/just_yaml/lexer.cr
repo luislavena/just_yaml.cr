@@ -257,7 +257,8 @@ module JustYAML
             end
 
             # Check if we should continue or stop
-            if at_end? || flow_scalar_terminator?(current_char)
+            # Comments and flow indicators terminate the scalar
+            if at_end? || flow_scalar_terminator?(current_char) || current_char == '#'
               break
             end
 
