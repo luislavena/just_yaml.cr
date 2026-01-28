@@ -226,6 +226,8 @@ module JustYAML
       advance # consume opening "
 
       value = String.build do |str|
+        trailing_ws = String::Builder.new
+
         loop do
           if at_end?
             raise LexerError.new("Unterminated double-quoted string", loc)
@@ -233,14 +235,19 @@ module JustYAML
 
           char = current_char
           if char == '"'
+            # Keep trailing whitespace before closing quote
+            str << trailing_ws.to_s
             advance # consume closing "
             break
           elsif char == '\\'
+            str << trailing_ws.to_s
+            trailing_ws = String::Builder.new
             result = scan_escape_sequence(loc)
             # scan_escape_sequence returns empty string for escaped newline
             str << result unless result.is_a?(String) && result.empty?
           elsif char == '\n'
-            # Line folding in double-quoted strings
+            # Strip trailing whitespace before line break
+            trailing_ws = String::Builder.new
             advance # consume newline
 
             # Check for document markers at start of line (forbidden in strings)
@@ -249,7 +256,13 @@ module JustYAML
             end
 
             str << fold_double_quoted_line
+          elsif char == ' ' || char == '\t'
+            # Track trailing whitespace
+            trailing_ws << advance
           else
+            # Regular character - flush trailing whitespace
+            str << trailing_ws.to_s
+            trailing_ws = String::Builder.new
             str << advance
           end
         end
