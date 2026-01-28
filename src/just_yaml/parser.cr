@@ -50,7 +50,26 @@ module JustYAML
       # Check for explicit document end
       if check(TokenType::DocumentEnd)
         doc.explicit_end = true
+        doc_end_line = @current_token.location.line
         advance
+
+        # Skip comments on the same line
+        if check(TokenType::Comment)
+          advance
+        end
+
+        # After document end, we must have newline, EOF, or new document marker
+        # Content on the same line is invalid
+        if !check(TokenType::StreamEnd) && !check(TokenType::Newline) &&
+           !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd)
+          if @current_token.location.line == doc_end_line
+            raise ParseError.new(
+              "Unexpected content after document end marker",
+              @current_token.location
+            )
+          end
+        end
+
         skip_comments_and_newlines
       end
 
