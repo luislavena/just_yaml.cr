@@ -790,15 +790,27 @@ module JustYAML
             raise LexerError.new("Unterminated verbatim tag", loc)
           end
           str << advance # consume >
-        else
+        elsif valid_tag_start_char?(current_char)
           # Local tag (!type) or named tag handle (!prefix!suffix)
+          # Tag name must start with valid word char (alphanumeric or -)
           while !at_end? && !tag_terminator?(current_char)
             str << advance
           end
+        else
+          # Invalid tag start character (like !" or !#) - treat as scalar
+          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
+            str << advance
+          end
+          return Token.new(TokenType::Scalar, str.to_s.strip, loc)
         end
       end
 
       Token.new(TokenType::Tag, value, loc)
+    end
+
+    # Check if character is valid for starting a tag name (after !)
+    private def valid_tag_start_char?(char : Char) : Bool
+      char.alphanumeric? || char == '-' || char == '_'
     end
 
     private def tag_terminator?(char : Char) : Bool

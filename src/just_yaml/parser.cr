@@ -515,7 +515,7 @@ module JustYAML
           end
         end
 
-        # At same indentation, continue if it's a plain scalar or directive-like content
+        # At same indentation, continue if it's a plain scalar or indicator-like content
         if check(TokenType::Directive)
           # Directive at same indentation is continuation content
           # (it's only a real directive if at start of stream or after document end)
@@ -524,6 +524,15 @@ module JustYAML
           # Skip the newline after the directive
           advance if check(TokenType::Newline)
           next
+        end
+
+        if check(TokenType::Tag)
+          # Tag at same indentation in continuation context is literal content
+          line_content = consume_plain_scalar_continuation_line
+          if line_content
+            empty_line_count = append_continuation_line(lines, line_content, empty_line_count)
+            next
+          end
         end
 
         break unless check(TokenType::Scalar)
@@ -1647,16 +1656,25 @@ module JustYAML
           # Calculate extra indentation (for more-indented lines)
           extra_indent = line_col > content_indent ? line_col - content_indent : 0
 
-          line_content = " " * extra_indent + line_value
-          lines << {content: line_content, indent: line_col, is_empty: false}
+          # Calculate where the content ends (for trailing whitespace detection)
+          content_end_col = line_col + line_value.size
           advance
 
-          # Consume the newline after this line
+          # Consume the newline after this line and check for trailing whitespace
+          trailing_ws = ""
           if check(TokenType::Newline)
+            newline_col = @current_token.location.column
+            # Trailing whitespace = characters between content end and newline
+            if newline_col > content_end_col
+              trailing_ws = " " * (newline_col - content_end_col)
+            end
             advance
           else
             break
           end
+
+          line_content = " " * extra_indent + line_value + trailing_ws
+          lines << {content: line_content, indent: line_col, is_empty: false}
         else
           break
         end
@@ -1734,7 +1752,9 @@ module JustYAML
             str << "\n"
             prev_empty = true
           else
-            is_more_indented = line[:content].starts_with?(" ")
+            # More-indented lines start with whitespace (space or tab)
+            first_char = line[:content][0]?
+            is_more_indented = first_char == ' ' || first_char == '\t'
 
             # Add separator between content lines
             if had_content && !prev_empty
