@@ -116,7 +116,22 @@ module JustYAML
     private def scan_value_indicator : Token
       loc = current_location
       advance
-      Token.new(TokenType::ValueIndicator, ":", loc)
+
+      # : followed by non-indicator characters is a plain scalar (e.g., ":foo")
+      # : followed by whitespace, newline, EOF, or flow indicators is a value indicator
+      if at_end? || current_char == ' ' || current_char == '\t' || current_char == '\n' ||
+         current_char == ',' || current_char == ']' || current_char == '}'
+        Token.new(TokenType::ValueIndicator, ":", loc)
+      else
+        # Scan as scalar (e.g., ":foo" becomes the scalar value ":foo")
+        value = String.build do |str|
+          str << ':'
+          while !at_end? && !scalar_terminator?(current_char)
+            str << advance
+          end
+        end
+        Token.new(TokenType::Scalar, value.strip, loc)
+      end
     end
 
     private def scan_key_indicator_or_scalar : Token
