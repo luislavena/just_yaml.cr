@@ -1620,7 +1620,7 @@ module JustYAML
                        when TokenType::ValueIndicator
                          ":"
                        when TokenType::Directive
-                         @current_token.value  # Already includes %
+                         @current_token.value # Already includes %
                        else
                          @current_token.value
                        end
