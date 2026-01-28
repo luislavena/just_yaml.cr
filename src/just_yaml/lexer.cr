@@ -127,7 +127,7 @@ module JustYAML
         # Scan as scalar (e.g., ":foo" becomes the scalar value ":foo")
         value = String.build do |str|
           str << ':'
-          while !at_end? && !scalar_terminator?(current_char)
+          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
             str << advance
           end
         end
@@ -159,7 +159,7 @@ module JustYAML
       value = String.build do |str|
         trailing_ws = String::Builder.new
 
-        while !at_end? && !scalar_terminator?(current_char)
+        while !at_end? && !scalar_terminator_with_colon_check?(current_char)
           char = current_char
           if char == ' ' || char == '\t'
             # Track trailing whitespace
@@ -184,6 +184,22 @@ module JustYAML
         end
       end
       Token.new(TokenType::Scalar, value.strip, loc)
+    end
+
+    # Check if character terminates a scalar, with special colon handling
+    # Colon only terminates when followed by whitespace
+    private def scalar_terminator_with_colon_check?(char : Char) : Bool
+      if char == ':'
+        # Peek at next char to see if it's whitespace
+        return false unless @reader.has_next?
+        saved_pos = @reader.pos
+        @reader.next_char
+        next_char = @reader.current_char
+        @reader.pos = saved_pos
+        next_char == ' ' || next_char == '\t' || next_char == '\n'
+      else
+        scalar_terminator?(char)
+      end
     end
 
     private def scan_single_quoted_scalar : Token
