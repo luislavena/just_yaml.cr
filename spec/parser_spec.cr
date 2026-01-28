@@ -155,6 +155,80 @@ describe JustYAML::Parser do
     end
   end
 
+  describe "quoted scalars" do
+    it "parses single-quoted scalars" do
+      yaml = "'hello world'"
+      result = JustYAML.load(yaml)
+      result.should eq("hello world")
+    end
+
+    it "parses double-quoted scalars" do
+      yaml = "\"hello world\""
+      result = JustYAML.load(yaml)
+      result.should eq("hello world")
+    end
+
+    it "parses single-quoted with escaped quotes" do
+      yaml = "'it''s a test'"
+      result = JustYAML.load(yaml)
+      result.should eq("it's a test")
+    end
+
+    it "parses double-quoted with escape sequences" do
+      yaml = "\"hello\\nworld\""
+      result = JustYAML.load(yaml)
+      result.should eq("hello\nworld")
+    end
+
+    it "parses mapping with quoted values" do
+      yaml = <<-YAML
+        name: "Alice Smith"
+        greeting: 'Hello, World!'
+        YAML
+
+      result = JustYAML.load(yaml)
+      result.should eq({"name" => "Alice Smith", "greeting" => "Hello, World!"})
+    end
+
+    it "parses quoted keys" do
+      yaml = <<-YAML
+        "quoted key": value
+        'single quoted': another
+        YAML
+
+      result = JustYAML.load(yaml)
+      result.should eq({"quoted key" => "value", "single quoted" => "another"})
+    end
+  end
+
+  describe "block scalars" do
+    it "parses literal block scalar" do
+      yaml = <<-YAML
+        text: |
+          line one
+          line two
+        YAML
+
+      ast = JustYAML.parse(yaml)
+      mapping = ast.documents.first.root.as(JustYAML::AST::MappingNode)
+      scalar = mapping.entries.first.value.as(JustYAML::AST::ScalarNode)
+      scalar.style.should eq(JustYAML::AST::ScalarStyle::Literal)
+    end
+
+    it "parses folded block scalar" do
+      yaml = <<-YAML
+        text: >
+          line one
+          line two
+        YAML
+
+      ast = JustYAML.parse(yaml)
+      mapping = ast.documents.first.root.as(JustYAML::AST::MappingNode)
+      scalar = mapping.entries.first.value.as(JustYAML::AST::ScalarNode)
+      scalar.style.should eq(JustYAML::AST::ScalarStyle::Folded)
+    end
+  end
+
   describe "nested structures" do
     it "parses deeply nested mappings" do
       yaml = <<-YAML
