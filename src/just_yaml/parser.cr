@@ -1273,10 +1273,69 @@ module JustYAML
       sequence
     end
 
-    # Parse a flow sequence item, which might be an implicit mapping entry
+    # Parse a flow sequence item, which might be an implicit or explicit mapping entry
     private def parse_flow_sequence_item : AST::Node
       skip_flow_whitespace
       start_loc = @current_token.location
+
+      # Check for explicit key indicator (? key : value)
+      if check(TokenType::KeyIndicator)
+        advance
+        skip_flow_whitespace
+
+        # Parse key (or empty key)
+        key : AST::Node
+        if check(TokenType::ValueIndicator) || check(TokenType::FlowSeparator) || check(TokenType::SequenceEnd)
+          key = AST::ScalarNode.new("")
+          key.start_location = @current_token.location
+          key.end_location = @current_token.location
+        else
+          key = parse_flow_node
+        end
+
+        skip_flow_whitespace
+
+        # Parse value if there's a colon
+        value : AST::Node? = nil
+        if check(TokenType::ValueIndicator)
+          advance
+          skip_flow_whitespace
+
+          unless check(TokenType::FlowSeparator) || check(TokenType::SequenceEnd)
+            value = parse_flow_node
+          end
+        end
+
+        # Create a mapping with single entry
+        mapping = AST::MappingNode.new
+        mapping.start_location = start_loc
+        mapping.end_location = @current_token.location
+        mapping.style = AST::CollectionStyle::Flow
+        mapping.entries << AST::MappingEntry.new(key: key, value: value)
+        return mapping
+      end
+
+      # Check for empty key (: value)
+      if check(TokenType::ValueIndicator)
+        empty_key = AST::ScalarNode.new("")
+        empty_key.start_location = @current_token.location
+        empty_key.end_location = @current_token.location
+
+        advance
+        skip_flow_whitespace
+
+        empty_key_value : AST::Node? = nil
+        unless check(TokenType::FlowSeparator) || check(TokenType::SequenceEnd)
+          empty_key_value = parse_flow_node
+        end
+
+        mapping = AST::MappingNode.new
+        mapping.start_location = start_loc
+        mapping.end_location = @current_token.location
+        mapping.style = AST::CollectionStyle::Flow
+        mapping.entries << AST::MappingEntry.new(key: empty_key, value: empty_key_value)
+        return mapping
+      end
 
       # Parse the first node
       first_node = parse_flow_node
@@ -1288,9 +1347,9 @@ module JustYAML
         skip_flow_whitespace
 
         # Parse value
-        value : AST::Node? = nil
+        implicit_value : AST::Node? = nil
         unless check(TokenType::FlowSeparator) || check(TokenType::SequenceEnd)
-          value = parse_flow_node
+          implicit_value = parse_flow_node
         end
 
         # Create a mapping with single entry
@@ -1298,7 +1357,7 @@ module JustYAML
         mapping.start_location = start_loc
         mapping.end_location = @current_token.location
         mapping.style = AST::CollectionStyle::Flow
-        mapping.entries << AST::MappingEntry.new(key: first_node, value: value)
+        mapping.entries << AST::MappingEntry.new(key: first_node, value: implicit_value)
         return mapping
       end
 
