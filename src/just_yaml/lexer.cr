@@ -113,22 +113,15 @@ module JustYAML
       # In block context, only spaces are valid indentation
       # Track start column to handle mid-line whitespace vs indentation
       start_col = @column
-      if @flow_level > 0
-        # Flow context: skip both spaces and tabs
+      if @flow_level > 0 || start_col > 1
+        # Flow context or mid-line: skip both spaces and tabs together
         while current_char == ' ' || current_char == '\t'
           advance
         end
       else
-        # Block context: only skip spaces for indentation
+        # Block context at start of line: only skip spaces for indentation
         while current_char == ' '
           advance
-        end
-        # If we started after column 1 (mid-line), also skip tabs
-        # But NOT if we started at column 1 (that would be skipping tab indentation)
-        if start_col > 1
-          while current_char == '\t'
-            advance
-          end
         end
       end
     end
