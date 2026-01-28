@@ -205,6 +205,13 @@ module JustYAML
               # End of string
               break
             end
+          elsif char == '\n'
+            str << advance # include the newline
+
+            # Check for document markers at start of line (forbidden in strings)
+            if @column == 1 && check_document_marker?
+              raise LexerError.new("Unterminated single-quoted string (document marker encountered)", loc)
+            end
           else
             str << advance
           end
@@ -235,6 +242,12 @@ module JustYAML
           elsif char == '\n'
             # Line folding in double-quoted strings
             advance # consume newline
+
+            # Check for document markers at start of line (forbidden in strings)
+            if @column == 1 && check_document_marker?
+              raise LexerError.new("Unterminated double-quoted string (document marker encountered)", loc)
+            end
+
             str << fold_double_quoted_line
           else
             str << advance
@@ -434,6 +447,26 @@ module JustYAML
       end
 
       Token.new(TokenType::Directive, value.strip, loc)
+    end
+
+    # Check if current position has a document marker (--- or ...)
+    private def check_document_marker? : Bool
+      return false unless current_char == '-' || current_char == '.'
+      return false unless @reader.has_next?
+
+      # Save position
+      saved_pos = @reader.pos
+      first_char = current_char
+
+      @reader.next_char
+      return false.tap { @reader.pos = saved_pos } unless @reader.current_char == first_char
+      return false.tap { @reader.pos = saved_pos } unless @reader.has_next?
+
+      @reader.next_char
+      result = @reader.current_char == first_char
+
+      @reader.pos = saved_pos
+      result
     end
 
     # Check if next two characters (after current) match c1 and c2
