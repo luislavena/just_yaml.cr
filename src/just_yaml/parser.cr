@@ -433,6 +433,14 @@ module JustYAML
 
       node = parse_mapping_value_content(key_indent, anchor, tag)
 
+      # If node is nil but we have an anchor or tag, create an empty scalar
+      # This handles cases like "a: &anchor" where the value is null
+      if node.nil? && (anchor || tag)
+        node = AST::ScalarNode.new("", AST::ScalarStyle::Plain)
+        node.start_location = @current_token.location
+        node.end_location = @current_token.location
+      end
+
       if node && anchor
         node.anchor = anchor
         @anchors[anchor] = node
