@@ -591,7 +591,14 @@ module JustYAML
       token = @current_token
       advance
 
-      style = AST::ScalarStyle::Plain
+      style = case token.scalar_style
+              when ScalarTokenStyle::SingleQuoted
+                AST::ScalarStyle::SingleQuoted
+              when ScalarTokenStyle::DoubleQuoted
+                AST::ScalarStyle::DoubleQuoted
+              else
+                AST::ScalarStyle::Plain
+              end
 
       node = AST::ScalarNode.new(token.value, style)
       node.start_location = token.location

@@ -153,7 +153,7 @@ module JustYAML
         end
       end
 
-      Token.new(TokenType::Scalar, value, loc)
+      Token.new(TokenType::Scalar, value, loc, ScalarTokenStyle::SingleQuoted)
     end
 
     private def scan_double_quoted_scalar : Token
@@ -178,7 +178,7 @@ module JustYAML
         end
       end
 
-      Token.new(TokenType::Scalar, value, loc)
+      Token.new(TokenType::Scalar, value, loc, ScalarTokenStyle::DoubleQuoted)
     end
 
     private def scan_escape_sequence(string_start_loc : Location) : Char | String

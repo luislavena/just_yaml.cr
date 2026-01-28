@@ -30,8 +30,8 @@ describe JustYAML::Parser do
 
       result = JustYAML.load(yaml)
       result.should eq([
-        {"name" => "Alice", "age" => "30"},
-        {"name" => "Bob", "age" => "25"},
+        {"name" => "Alice", "age" => 30_i64},
+        {"name" => "Bob", "age" => 25_i64},
       ])
     end
 
@@ -64,7 +64,7 @@ describe JustYAML::Parser do
     it "parses nested flow sequences" do
       yaml = "[[1, 2], [3, 4]]"
       result = JustYAML.load(yaml)
-      result.should eq([["1", "2"], ["3", "4"]])
+      result.should eq([[1_i64, 2_i64], [3_i64, 4_i64]])
     end
 
     it "allows trailing comma" do
@@ -84,19 +84,19 @@ describe JustYAML::Parser do
     it "parses simple flow mapping" do
       yaml = "{name: Alice, age: 30}"
       result = JustYAML.load(yaml)
-      result.should eq({"name" => "Alice", "age" => "30"})
+      result.should eq({"name" => "Alice", "age" => 30_i64})
     end
 
     it "parses nested flow mapping" do
       yaml = "{person: {name: Alice, age: 30}}"
       result = JustYAML.load(yaml)
-      result.should eq({"person" => {"name" => "Alice", "age" => "30"}})
+      result.should eq({"person" => {"name" => "Alice", "age" => 30_i64}})
     end
 
     it "allows trailing comma" do
       yaml = "{name: Alice, age: 30,}"
       result = JustYAML.load(yaml)
-      result.should eq({"name" => "Alice", "age" => "30"})
+      result.should eq({"name" => "Alice", "age" => 30_i64})
     end
   end
 
@@ -116,7 +116,7 @@ describe JustYAML::Parser do
         YAML
 
       result = JustYAML.load(yaml)
-      result.should eq({"person" => {"name" => "Alice", "age" => "30"}})
+      result.should eq({"person" => {"name" => "Alice", "age" => 30_i64}})
     end
 
     it "parses block sequence with flow mapping items" do
@@ -273,8 +273,8 @@ describe JustYAML::Parser do
 
       result = JustYAML.load(yaml)
       result.should eq({
-        "person" => {"name" => "Alice", "age" => "30"},
-        "copy"   => {"name" => "Alice", "age" => "30"},
+        "person" => {"name" => "Alice", "age" => 30_i64},
+        "copy"   => {"name" => "Alice", "age" => 30_i64},
       })
     end
 

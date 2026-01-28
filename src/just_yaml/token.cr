@@ -33,12 +33,19 @@ module JustYAML
     Directive # %YAML, %TAG
   end
 
+  enum ScalarTokenStyle
+    Plain
+    SingleQuoted
+    DoubleQuoted
+  end
+
   class Token
     getter type : TokenType
     getter value : String
     getter location : Location
+    getter scalar_style : ScalarTokenStyle
 
-    def initialize(@type : TokenType, @value : String, @location : Location)
+    def initialize(@type : TokenType, @value : String, @location : Location, @scalar_style : ScalarTokenStyle = ScalarTokenStyle::Plain)
     end
 
     def to_s(io : IO) : Nil

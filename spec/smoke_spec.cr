@@ -9,7 +9,7 @@ describe "JustYAML smoke test" do
 
     result = JustYAML.load(yaml)
 
-    result.should eq({"name" => "JustYAML", "version" => "1.0"})
+    result.should eq({"name" => "JustYAML", "version" => 1.0})
   end
 
   it "returns AST with parse" do
