@@ -146,7 +146,7 @@ module JustYAML
       when TokenType::MappingStart
         parse_flow_mapping
       when TokenType::BlockScalarHeader
-        parse_block_scalar
+        parse_block_scalar(min_indent)
       when TokenType::ValueIndicator
         # Implicit null key mapping (e.g., ": value")
         parse_block_mapping_with_null_key(min_indent)
@@ -482,7 +482,7 @@ module JustYAML
       when TokenType::MappingStart
         parse_flow_mapping
       when TokenType::BlockScalarHeader
-        parse_block_scalar
+        parse_block_scalar(key_indent)
       when TokenType::SequenceEntry
         # Inline sequence entry (rare but valid)
         parse_block_sequence(key_indent)
@@ -671,7 +671,7 @@ module JustYAML
         # Nested sequence
         parse_block_sequence(entry_indent)
       when TokenType::BlockScalarHeader
-        parse_block_scalar
+        parse_block_scalar(entry_indent)
       when TokenType::Newline, TokenType::Comment
         # Check for block content on next line
         skip_comments_and_newlines
@@ -878,7 +878,7 @@ module JustYAML
       node
     end
 
-    private def parse_block_scalar : AST::ScalarNode
+    private def parse_block_scalar(parent_indent : Int32 = 0) : AST::ScalarNode
       header = @current_token
       loc = header.location
       advance
@@ -921,8 +921,17 @@ module JustYAML
 
       # Collect lines with their raw content (preserving indentation info)
       lines = [] of {content: String, indent: Int32, is_empty: Bool}
-      # Explicit indent specifies number of spaces; column is 1-indexed, so add 1
-      content_indent = explicit_indent > 0 ? explicit_indent + 1 : -1
+      # Explicit indent specifies the additional indentation relative to parent context
+      # Content indent is calculated as parent_indent + explicit_indent (in column terms)
+      # If no explicit indent, auto-detect from first content line
+      if explicit_indent > 0
+        # explicit_indent is relative to parent; parent_indent is already 1-indexed column
+        content_indent = parent_indent + explicit_indent
+        min_content_indent = content_indent
+      else
+        content_indent = -1                    # Will be auto-detected from first content line
+        min_content_indent = parent_indent + 1 # At minimum, more indented than parent
+      end
 
       while !check(TokenType::StreamEnd) && !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd)
         if check(TokenType::Newline)
@@ -938,12 +947,17 @@ module JustYAML
                          @current_token.value
                        end
 
-          # Determine content indentation from first content line
+          # Line must be at or above minimum content indent
+          if line_col < min_content_indent
+            break
+          end
+
+          # Auto-detect content indentation from first content line
           if content_indent < 0
             content_indent = line_col
           end
 
-          # Check if we've dedented below content level
+          # Check if we've dedented below auto-detected content level
           if line_col < content_indent
             break
           end
