@@ -1588,7 +1588,8 @@ module JustYAML
         elsif check(TokenType::Scalar) || check(TokenType::Comment) ||
               check(TokenType::Anchor) || check(TokenType::Alias) ||
               check(TokenType::Tag) || check(TokenType::SequenceEntry) ||
-              check(TokenType::KeyIndicator) || check(TokenType::ValueIndicator)
+              check(TokenType::KeyIndicator) || check(TokenType::ValueIndicator) ||
+              check(TokenType::Directive)
           # In block scalars, all indicators are literal content
           line_col = @current_token.location.column
           line_value = case @current_token.type
@@ -1606,6 +1607,8 @@ module JustYAML
                          "?"
                        when TokenType::ValueIndicator
                          ":"
+                       when TokenType::Directive
+                         @current_token.value  # Already includes %
                        else
                          @current_token.value
                        end
