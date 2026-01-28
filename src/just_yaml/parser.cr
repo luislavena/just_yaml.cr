@@ -968,11 +968,27 @@ module JustYAML
             lines << {content: "", indent: 0, is_empty: true}
           end
           advance
-        elsif check(TokenType::Scalar) || check(TokenType::Comment)
-          # In block scalars, comments are literal content (# is not special)
+        elsif check(TokenType::Scalar) || check(TokenType::Comment) ||
+              check(TokenType::Anchor) || check(TokenType::Alias) ||
+              check(TokenType::Tag) || check(TokenType::SequenceEntry) ||
+              check(TokenType::KeyIndicator) || check(TokenType::ValueIndicator)
+          # In block scalars, all indicators are literal content
           line_col = @current_token.location.column
-          line_value = if check(TokenType::Comment)
+          line_value = case @current_token.type
+                       when TokenType::Comment
                          "#" + @current_token.value
+                       when TokenType::Anchor
+                         "&" + @current_token.value
+                       when TokenType::Alias
+                         "*" + @current_token.value
+                       when TokenType::Tag
+                         @current_token.value
+                       when TokenType::SequenceEntry
+                         "-"
+                       when TokenType::KeyIndicator
+                         "?"
+                       when TokenType::ValueIndicator
+                         ":"
                        else
                          @current_token.value
                        end

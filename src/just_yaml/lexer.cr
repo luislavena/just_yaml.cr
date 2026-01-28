@@ -647,8 +647,19 @@ module JustYAML
       loc = current_location
       advance # consume &
 
-      name = scan_anchor_alias_name(loc, "anchor")
+      # & followed by whitespace is a plain scalar, not an anchor
+      if at_end? || !valid_anchor_alias_char?(current_char)
+        # Scan as scalar
+        value = String.build do |str|
+          str << '&'
+          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
+            str << advance
+          end
+        end
+        return Token.new(TokenType::Scalar, value.rstrip, loc)
+      end
 
+      name = scan_anchor_alias_name(loc, "anchor")
       Token.new(TokenType::Anchor, name, loc)
     end
 
@@ -656,8 +667,19 @@ module JustYAML
       loc = current_location
       advance # consume *
 
-      name = scan_anchor_alias_name(loc, "alias")
+      # * followed by whitespace is a plain scalar, not an alias
+      if at_end? || !valid_anchor_alias_char?(current_char)
+        # Scan as scalar
+        value = String.build do |str|
+          str << '*'
+          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
+            str << advance
+          end
+        end
+        return Token.new(TokenType::Scalar, value.rstrip, loc)
+      end
 
+      name = scan_anchor_alias_name(loc, "alias")
       Token.new(TokenType::Alias, name, loc)
     end
 
