@@ -30,6 +30,9 @@ module JustYAML
       doc = AST::DocumentNode.new
       doc.start_location = @current_token.location
 
+      # Skip any directives before document
+      skip_directives
+
       # Check for explicit document start
       if check(TokenType::DocumentStart)
         doc.explicit_start = true
@@ -122,6 +125,9 @@ module JustYAML
         parse_flow_mapping
       when TokenType::BlockScalarHeader
         parse_block_scalar
+      when TokenType::ValueIndicator
+        # Implicit null key mapping (e.g., ": value")
+        parse_block_mapping_with_null_key(min_indent)
       else
         raise ParseError.new(
           "Unexpected token #{@current_token.type}",
@@ -182,6 +188,46 @@ module JustYAML
           # Block sequence at same level - not part of this mapping
           break
         else
+          break
+        end
+      end
+
+      mapping.end_location = @current_token.location
+      mapping
+    end
+
+    private def parse_block_mapping_with_null_key(min_indent : Int32) : AST::MappingNode
+      mapping = AST::MappingNode.new
+      mapping.start_location = @current_token.location
+      mapping.style = AST::CollectionStyle::Block
+
+      key_indent = @current_token.location.column
+
+      loop do
+        # Create null key
+        key = AST::ScalarNode.new("")
+        key.start_location = @current_token.location
+        key.end_location = @current_token.location
+
+        expect(TokenType::ValueIndicator)
+        skip_whitespace_tokens
+
+        value = parse_mapping_value(key_indent)
+        mapping.entries << AST::MappingEntry.new(key: key, value: value)
+
+        skip_comments_and_newlines
+
+        # Check if we're done with this mapping
+        break if check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+
+        # Check indentation for next potential entry
+        next_col = @current_token.location.column
+        break if next_col < key_indent
+
+        # Check for another null key entry
+        unless check(TokenType::ValueIndicator)
           break
         end
       end
@@ -548,43 +594,169 @@ module JustYAML
                 AST::ScalarStyle::Folded
               end
 
-      # Skip to content
-      skip_comments_and_newlines
+      # Parse chomping indicator and explicit indentation
+      chomping = :clip # default
+      explicit_indent = 0
 
-      # Read block scalar content
-      content = String.build do |str|
-        # Determine content indentation from first non-empty line
-        content_indent = @current_token.location.column
-
-        while !check(TokenType::StreamEnd) && !check(TokenType::DocumentStart)
-          line_col = @current_token.location.column
-          break if line_col < content_indent && !check(TokenType::Newline)
-
-          if check(TokenType::Scalar)
-            str << @current_token.value
-            advance
-          elsif check(TokenType::Newline)
-            str << "\n"
-            advance
-            skip_whitespace_tokens
-          else
-            break
-          end
+      header_value[1..].each_char do |c|
+        case c
+        when '-'
+          chomping = :strip
+        when '+'
+          chomping = :keep
+        when '1'..'9'
+          explicit_indent = c.to_i
         end
       end
 
-      # Process according to style
-      processed = if style == AST::ScalarStyle::Folded
-                    # Folded: replace single newlines with spaces
-                    content.gsub(/(?<!\n)\n(?!\n)/, " ").strip
-                  else
-                    content.rstrip
-                  end
+      # Skip comment on header line (but not the newline yet)
+      if check(TokenType::Comment)
+        advance
+      end
 
-      node = AST::ScalarNode.new(processed, style)
+      # Must have a newline after header
+      unless check(TokenType::Newline) || check(TokenType::StreamEnd)
+        raise ParseError.new("Expected newline after block scalar header", @current_token.location)
+      end
+
+      # Skip the newline to get to content
+      advance if check(TokenType::Newline)
+
+      # Collect lines with their raw content (preserving indentation info)
+      lines = [] of {content: String, indent: Int32, is_empty: Bool}
+      content_indent = explicit_indent > 0 ? explicit_indent : -1
+
+      while !check(TokenType::StreamEnd) && !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd)
+        if check(TokenType::Newline)
+          # Empty line
+          lines << {content: "", indent: 0, is_empty: true}
+          advance
+        elsif check(TokenType::Scalar)
+          line_col = @current_token.location.column
+
+          # Determine content indentation from first content line
+          if content_indent < 0
+            content_indent = line_col
+          end
+
+          # Check if we've dedented below content level
+          if line_col < content_indent
+            break
+          end
+
+          # Calculate extra indentation (for more-indented lines)
+          extra_indent = line_col > content_indent ? line_col - content_indent : 0
+
+          line_content = " " * extra_indent + @current_token.value
+          lines << {content: line_content, indent: line_col, is_empty: false}
+          advance
+
+          # Consume the newline after this line
+          if check(TokenType::Newline)
+            advance
+          else
+            break
+          end
+        else
+          break
+        end
+      end
+
+      # If no content at all, return empty scalar with appropriate trailing
+      if lines.empty? || lines.all?(&.[:is_empty])
+        result = chomping == :keep ? "\n" * lines.size : ""
+        node = AST::ScalarNode.new(result, style)
+        node.start_location = loc
+        node.end_location = @current_token.location
+        return node
+      end
+
+      # Build result based on style
+      result = if style == AST::ScalarStyle::Literal
+                 # Literal: preserve all newlines between content lines
+                 build_literal_scalar(lines, chomping)
+               else
+                 # Folded: fold single newlines to spaces, preserve multiple
+                 build_folded_scalar(lines, chomping)
+               end
+
+      node = AST::ScalarNode.new(result, style)
       node.start_location = loc
       node.end_location = @current_token.location
       node
+    end
+
+    private def build_literal_scalar(lines : Array({content: String, indent: Int32, is_empty: Bool}), chomping : Symbol) : String
+      # Find last non-empty line for chomping
+      last_content_idx = lines.rindex { |l| !l[:is_empty] } || -1
+
+      result = String.build do |str|
+        lines.each_with_index do |line, idx|
+          # Skip trailing empty lines unless keeping
+          next if idx > last_content_idx && chomping != :keep
+
+          if line[:is_empty]
+            str << "\n"
+          else
+            str << line[:content]
+            # Add newline after content lines (except the last one for strip mode)
+            if idx < last_content_idx || chomping != :strip
+              str << "\n"
+            end
+          end
+        end
+
+        # For strip mode, we don't add trailing newline (handled above)
+        # For clip mode, we added exactly one newline after last content
+        # For keep mode, we added all trailing empty lines plus newline after last content
+      end
+
+      result
+    end
+
+    private def build_folded_scalar(lines : Array({content: String, indent: Int32, is_empty: Bool}), chomping : Symbol) : String
+      # Find last non-empty line for chomping
+      last_content_idx = lines.rindex { |l| !l[:is_empty] } || -1
+
+      result = String.build do |str|
+        prev_empty = false
+        prev_more_indented = false
+
+        lines.each_with_index do |line, idx|
+          # Skip trailing empty lines unless keeping
+          next if idx > last_content_idx && chomping != :keep
+
+          if line[:is_empty]
+            str << "\n"
+            prev_empty = true
+          else
+            is_more_indented = line[:content].starts_with?(" ")
+
+            # Add separator between content lines
+            if idx > 0 && !prev_empty
+              if prev_more_indented || is_more_indented
+                str << "\n"
+              else
+                str << " "
+              end
+            end
+
+            str << line[:content]
+            prev_empty = false
+            prev_more_indented = is_more_indented
+          end
+        end
+
+        # Apply chomping for final newline
+        case chomping
+        when :clip, :keep
+          str << "\n"
+        when :strip
+          # No trailing newline
+        end
+      end
+
+      result
     end
 
     private def parse_scalar : AST::ScalarNode
@@ -624,6 +796,12 @@ module JustYAML
           "Expected #{type}, got #{@current_token.type}",
           @current_token.location
         )
+      end
+    end
+
+    private def skip_directives : Nil
+      while check(TokenType::Directive) || check(TokenType::Newline) || check(TokenType::Comment)
+        advance
       end
     end
 
