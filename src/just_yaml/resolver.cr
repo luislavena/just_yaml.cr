@@ -169,8 +169,35 @@ module JustYAML
       case node
       when AST::ScalarNode
         node.value
+      when AST::SequenceNode
+        # Convert sequence key to string representation
+        resolved = resolve_sequence(node)
+        any_to_key_string(resolved)
+      when AST::MappingNode
+        # Convert mapping key to string representation
+        resolved = resolve_mapping(node)
+        any_to_key_string(resolved)
       else
-        raise ResolveError.new("Non-scalar mapping keys not yet supported", node.start_location)
+        raise ResolveError.new("Unsupported mapping key type", node.start_location)
+      end
+    end
+
+    private def any_to_key_string(value : Any) : String
+      case value
+      when Nil
+        "null"
+      when Bool
+        value.to_s
+      when Int64, Float64
+        value.to_s
+      when String
+        value.inspect
+      when Array
+        "[" + value.map { |v| any_to_key_string(v) }.join(", ") + "]"
+      when Hash
+        "{" + value.map { |k, v| "#{k.inspect}: #{any_to_key_string(v)}" }.join(", ") + "}"
+      else
+        value.to_s
       end
     end
   end

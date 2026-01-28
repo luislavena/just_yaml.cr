@@ -178,6 +178,29 @@ module JustYAML
         # Explicit key mapping (e.g., "? key\n: value")
         node = parse_block_mapping_with_explicit_key(min_indent)
         apply_node_properties(node, anchor, tag)
+      when TokenType::Anchor, TokenType::Tag
+        # Nested anchor/tag (e.g., "&outer\n&inner value")
+        # The outer anchor applies to the whole structure
+        inner_anchor, inner_tag, alias_node = parse_node_properties
+        if alias_node
+          # Apply outer properties and return alias
+          apply_node_properties(alias_node, anchor, tag)
+        else
+          skip_comments_and_newlines
+          # Parse the inner node
+          inner_node = parse_inner_node_with_properties(min_indent, entry_start_col, inner_anchor, inner_tag)
+          skip_whitespace_tokens
+
+          # Check if this is a mapping key
+          if check(TokenType::ValueIndicator)
+            # The inner node is a mapping key - create a mapping
+            key = inner_node
+            mapping = parse_block_mapping_with_complex_key(key, entry_start_col)
+            apply_node_properties(mapping, anchor, tag)
+          else
+            apply_node_properties(inner_node, anchor, tag)
+          end
+        end
       else
         raise ParseError.new(
           "Unexpected token #{@current_token.type}",
@@ -193,6 +216,141 @@ module JustYAML
       end
       node.tag = tag if tag
       node
+    end
+
+    # Parse inner node with properties (doesn't check for mapping key afterward)
+    private def parse_inner_node_with_properties(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?) : AST::Node
+      case @current_token.type
+      when TokenType::Scalar
+        scalar = parse_scalar
+        apply_node_properties(scalar, anchor, tag)
+      when TokenType::SequenceStart
+        node = parse_flow_sequence
+        apply_node_properties(node, anchor, tag)
+      when TokenType::MappingStart
+        node = parse_flow_mapping
+        apply_node_properties(node, anchor, tag)
+      when TokenType::SequenceEntry
+        node = parse_block_sequence(min_indent)
+        apply_node_properties(node, anchor, tag)
+      when TokenType::BlockScalarHeader
+        node = parse_block_scalar(min_indent)
+        apply_node_properties(node, anchor, tag)
+      when TokenType::Anchor, TokenType::Tag
+        # Another level of nesting
+        inner_anchor, inner_tag, alias_node = parse_node_properties
+        if alias_node
+          apply_node_properties(alias_node, anchor, tag)
+        else
+          skip_comments_and_newlines
+          node = parse_inner_node_with_properties(min_indent, entry_start_col, inner_anchor, inner_tag)
+          apply_node_properties(node, anchor, tag)
+        end
+      else
+        raise ParseError.new(
+          "Unexpected token #{@current_token.type}",
+          @current_token.location
+        )
+      end
+    end
+
+    # Parse a block mapping where the first key is already parsed as a complex node
+    private def parse_block_mapping_with_complex_key(first_key : AST::Node, key_indent : Int32) : AST::MappingNode
+      mapping = AST::MappingNode.new
+      mapping.start_location = first_key.start_location || @current_token.location
+      mapping.style = AST::CollectionStyle::Block
+
+      key = first_key
+
+      loop do
+        expect(TokenType::ValueIndicator)
+        skip_whitespace_tokens
+
+        value = parse_mapping_value(key_indent)
+        mapping.entries << AST::MappingEntry.new(key: key, value: value)
+
+        skip_comments_and_newlines
+
+        break if check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+
+        next_col = @current_token.location.column
+        break if next_col < key_indent
+
+        # For subsequent keys, use standard parsing
+        case @current_token.type
+        when TokenType::Scalar, TokenType::Anchor, TokenType::Tag
+          entry_start = @current_token.location.column
+          break if entry_start != key_indent
+
+          # Parse key with potential anchor/tag
+          next_key_anchor : String? = nil
+          next_key_tag : String? = nil
+
+          if check(TokenType::Anchor)
+            next_key_anchor = @current_token.value
+            advance
+            skip_whitespace_tokens
+          end
+
+          if check(TokenType::Tag)
+            next_key_tag = @current_token.value
+            advance
+            skip_whitespace_tokens
+          end
+
+          if check(TokenType::Scalar)
+            key = parse_scalar
+            skip_whitespace_tokens
+            unless check(TokenType::ValueIndicator)
+              raise ParseError.new("Expected ':' after mapping key", @current_token.location)
+            end
+            if next_key_anchor
+              key.anchor = next_key_anchor
+              @anchors[next_key_anchor] = key
+            end
+            key.tag = next_key_tag if next_key_tag
+          elsif check(TokenType::SequenceStart) || check(TokenType::MappingStart)
+            key = if check(TokenType::SequenceStart)
+                    parse_flow_sequence
+                  else
+                    parse_flow_mapping
+                  end
+            skip_whitespace_tokens
+            unless check(TokenType::ValueIndicator)
+              raise ParseError.new("Expected ':' after mapping key", @current_token.location)
+            end
+            if next_key_anchor
+              key.anchor = next_key_anchor
+              @anchors[next_key_anchor] = key
+            end
+            key.tag = next_key_tag if next_key_tag
+          else
+            break
+          end
+        when TokenType::KeyIndicator
+          # Explicit key
+          advance
+          skip_whitespace_tokens
+          if check(TokenType::Newline) || check(TokenType::ValueIndicator)
+            key = AST::ScalarNode.new("")
+            key.start_location = @current_token.location
+            key.end_location = @current_token.location
+          else
+            key = parse_node(key_indent)
+          end
+          skip_comments_and_newlines
+          unless check(TokenType::ValueIndicator)
+            raise ParseError.new("Expected ':' after explicit key", @current_token.location)
+          end
+        else
+          break
+        end
+      end
+
+      mapping.end_location = @current_token.location
+      mapping
     end
 
     private def parse_mapping_or_scalar(min_indent : Int32) : AST::Node
