@@ -1269,6 +1269,15 @@ module JustYAML
             @anchors[nested_anchor] = node
           end
           return node
+        elsif check(TokenType::BlockScalarHeader)
+          # Tagged block scalar - use key_indent as parent indent
+          node = parse_block_scalar(key_indent)
+          node.tag = nested_tag
+          if nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          return node
         else
           # Check if there's a nested mapping (scalar followed by :)
           content_col = @current_token.location.column
