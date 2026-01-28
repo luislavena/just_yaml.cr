@@ -470,6 +470,92 @@ module JustYAML
       parts.join(" ")
     end
 
+    # Parse multiline plain scalar in mapping value context
+    private def parse_multiline_plain_scalar_in_mapping(first_scalar : AST::ScalarNode, key_indent : Int32) : AST::Node
+      return first_scalar unless first_scalar.style == AST::ScalarStyle::Plain
+
+      scalar_indent = first_scalar.start_location.column
+      lines = [first_scalar.value]
+      empty_line_count = 0
+
+      loop do
+        break unless check(TokenType::Newline) || check(TokenType::Comment)
+
+        while check(TokenType::Newline)
+          advance
+          if check(TokenType::Newline) || check(TokenType::StreamEnd)
+            empty_line_count += 1
+          end
+        end
+
+        if check(TokenType::Comment)
+          advance
+          next
+        end
+
+        break if check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+
+        next_col = @current_token.location.column
+
+        # Stop if we've dedented to key level or less (next mapping entry)
+        break if next_col <= key_indent
+
+        # More indented continuation - all tokens become literal text
+        if next_col > scalar_indent
+          line_content = consume_plain_scalar_continuation_line
+          if line_content
+            if empty_line_count > 0
+              lines << "\n" * empty_line_count
+              empty_line_count = 0
+            end
+            lines << line_content
+            next
+          else
+            break
+          end
+        end
+
+        # At same indentation as scalar start, must be a scalar
+        break unless check(TokenType::Scalar)
+
+        saved_token = @current_token
+        next_scalar = parse_scalar
+        skip_whitespace_tokens
+
+        if check(TokenType::ValueIndicator)
+          # This is a new mapping entry, not a continuation
+          raise ParseError.new(
+            "Cannot have mapping key after multiline scalar at same indentation",
+            saved_token.location
+          )
+        end
+
+        if empty_line_count > 0
+          lines << "\n" * empty_line_count
+          empty_line_count = 0
+        end
+        lines << next_scalar.value
+      end
+
+      return first_scalar if lines.size == 1
+
+      result = String.build do |str|
+        lines.each_with_index do |line, idx|
+          if idx > 0 && !lines[idx - 1].ends_with?("\n") && !line.starts_with?("\n")
+            str << " "
+          end
+          str << line.gsub(/^\n+/) { |m| m }
+        end
+      end
+
+      scalar = AST::ScalarNode.new(result, AST::ScalarStyle::Plain)
+      scalar.start_location = first_scalar.start_location
+      scalar.end_location = @current_token.location
+      scalar
+    end
+
     private def parse_block_mapping(first_key : AST::ScalarNode, min_indent : Int32) : AST::MappingNode
       mapping = AST::MappingNode.new
       mapping.start_location = first_key.start_location
@@ -781,7 +867,8 @@ module JustYAML
           # Nested mapping inline
           parse_block_mapping(scalar, key_indent)
         else
-          scalar
+          # Check for multiline plain scalar
+          parse_multiline_plain_scalar_in_mapping(scalar, key_indent)
         end
       when TokenType::SequenceStart
         parse_flow_sequence
