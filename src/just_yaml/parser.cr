@@ -550,8 +550,13 @@ module JustYAML
           )
         end
 
-        # Add this line as continuation
-        empty_line_count = append_continuation_line(lines, next_scalar.value, empty_line_count)
+        # A line with only whitespace is treated as an empty line (produces newline)
+        if next_scalar.value.empty?
+          empty_line_count += 1
+        else
+          # Add this line as continuation
+          empty_line_count = append_continuation_line(lines, next_scalar.value, empty_line_count)
+        end
       end
 
       # If no continuation, just return original scalar
