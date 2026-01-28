@@ -1154,6 +1154,9 @@ module JustYAML
         advance
         skip_whitespace_tokens
 
+        # Skip newlines - content may be on next line
+        skip_comments_and_newlines
+
         # Now check what follows the anchor
         # If it's a scalar followed by :, this is a mapping (anchor is on the key)
         # If it's just a scalar, the anchor is on the value (check for duplicates)
@@ -1187,6 +1190,34 @@ module JustYAML
             @anchors[nested_anchor] = scalar
             return scalar
           end
+        elsif check(TokenType::SequenceEntry)
+          # Anchor on a sequence
+          seq_col = @current_token.location.column
+          node = parse_block_sequence(seq_col)
+          node.anchor = nested_anchor
+          @anchors[nested_anchor] = node
+          return node
+        elsif check(TokenType::KeyIndicator)
+          # Anchor on an explicit key mapping
+          node = parse_block_mapping_with_explicit_key(@current_token.location.column)
+          node.anchor = nested_anchor
+          @anchors[nested_anchor] = node
+          return node
+        elsif check(TokenType::MappingStart)
+          node = parse_flow_mapping
+          node.anchor = nested_anchor
+          @anchors[nested_anchor] = node
+          return node
+        elsif check(TokenType::SequenceStart)
+          node = parse_flow_sequence
+          node.anchor = nested_anchor
+          @anchors[nested_anchor] = node
+          return node
+        elsif check(TokenType::BlockScalarHeader)
+          node = parse_block_scalar(key_indent)
+          node.anchor = nested_anchor
+          @anchors[nested_anchor] = node
+          return node
         else
           # Not a scalar - recursively parse
           node = parse_nested_value(next_col, key_indent, nested_anchor, nil)
