@@ -929,10 +929,18 @@ module JustYAML
 
         next_col = @current_token.location.column
 
-        # Value must be more indented than key
-        if next_col <= key_indent
-          # Not a nested value, just null
+        # Block sequences/mappings as values can be at same level as key
+        # But scalars must be more indented
+        if next_col < key_indent
+          # Dedented - not a nested value
           return nil
+        end
+
+        if next_col == key_indent
+          # Same level - only valid for sequences/mappings, not scalars
+          unless check(TokenType::SequenceEntry) || check(TokenType::KeyIndicator)
+            return nil
+          end
         end
 
         # Nested block content
