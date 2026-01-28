@@ -433,8 +433,8 @@ module JustYAML
     end
 
     private def scan_anchor_alias_name(loc : Location, kind : String) : String
-      if at_end? || !valid_anchor_alias_start?(current_char)
-        raise LexerError.new("Invalid #{kind} name: must start with a letter or underscore", loc)
+      if at_end? || !valid_anchor_alias_char?(current_char)
+        raise LexerError.new("Invalid #{kind} name: must contain valid characters", loc)
       end
 
       String.build do |str|
@@ -444,12 +444,15 @@ module JustYAML
       end
     end
 
-    private def valid_anchor_alias_start?(char : Char) : Bool
-      char.ascii_letter? || char == '_'
+    private def valid_anchor_alias_char?(char : Char) : Bool
+      # YAML spec: ns-anchor-char excludes flow indicators, whitespace, and certain chars
+      # We use a blocklist approach for better compatibility
+      !anchor_alias_terminator?(char)
     end
 
-    private def valid_anchor_alias_char?(char : Char) : Bool
-      char.ascii_alphanumeric? || char == '-' || char == '_'
+    private def anchor_alias_terminator?(char : Char) : Bool
+      char == ' ' || char == '\t' || char == '\n' || char == '\r' ||
+        char == '[' || char == ']' || char == '{' || char == '}' || char == ','
     end
 
     private def scan_tag : Token

@@ -632,13 +632,13 @@ describe JustYAML::Lexer do
       token2.value.should eq("value")
     end
 
-    it "raises error for anchor starting with digit" do
+    it "allows anchor starting with digit (per YAML spec)" do
       lexer = JustYAML::Lexer.new("&123abc")
       lexer.next_token # StreamStart
 
-      expect_raises(JustYAML::LexerError, /Invalid anchor name/) do
-        lexer.next_token
-      end
+      token = lexer.next_token
+      token.type.should eq(JustYAML::TokenType::Anchor)
+      token.value.should eq("123abc")
     end
 
     it "raises error for empty anchor name" do
@@ -711,13 +711,13 @@ describe JustYAML::Lexer do
       token2.value.should eq("next")
     end
 
-    it "raises error for alias starting with digit" do
+    it "allows alias starting with digit (per YAML spec)" do
       lexer = JustYAML::Lexer.new("*123abc")
       lexer.next_token # StreamStart
 
-      expect_raises(JustYAML::LexerError, /Invalid alias name/) do
-        lexer.next_token
-      end
+      token = lexer.next_token
+      token.type.should eq(JustYAML::TokenType::Alias)
+      token.value.should eq("123abc")
     end
 
     it "raises error for empty alias name" do
