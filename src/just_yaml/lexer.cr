@@ -207,7 +207,13 @@ module JustYAML
             advance # consume closing "
             break
           elsif char == '\\'
-            str << scan_escape_sequence(loc)
+            result = scan_escape_sequence(loc)
+            # scan_escape_sequence returns empty string for escaped newline
+            str << result unless result.is_a?(String) && result.empty?
+          elsif char == '\n'
+            # Line folding in double-quoted strings
+            advance # consume newline
+            str << fold_double_quoted_line
           else
             str << advance
           end
@@ -215,6 +221,41 @@ module JustYAML
       end
 
       Token.new(TokenType::Scalar, value, loc, ScalarTokenStyle::DoubleQuoted)
+    end
+
+    # Handle line folding in double-quoted strings
+    # - Skip leading whitespace on continuation line
+    # - Return space for normal fold, newline for empty line
+    private def fold_double_quoted_line : String
+      # Check if this line is empty (only whitespace before newline)
+      result = String.build do |str|
+        # Count consecutive empty lines (newlines followed by whitespace only)
+        empty_lines = 0
+
+        loop do
+          # Skip leading whitespace
+          while current_char == ' ' || current_char == '\t'
+            advance
+          end
+
+          if current_char == '\n'
+            # Empty line - counts as a literal newline
+            empty_lines += 1
+            advance
+          else
+            break
+          end
+        end
+
+        if empty_lines > 0
+          # Empty lines become newlines
+          str << "\n" * empty_lines
+        else
+          # Normal line break becomes a space
+          str << " "
+        end
+      end
+      result
     end
 
     private def scan_escape_sequence(string_start_loc : Location) : Char | String
@@ -233,6 +274,12 @@ module JustYAML
       when 't'  then '\t'
       when '\t' then '\t' # literal tab after backslash
       when 'n'  then '\n'
+      when '\n'
+        # Escaped newline - skip the newline and any leading whitespace on next line
+        while current_char == ' ' || current_char == '\t'
+          advance
+        end
+        "" # Return empty string (newline is escaped away)
       when 'v'  then '\v'
       when 'f'  then '\f'
       when 'r'  then '\r'
