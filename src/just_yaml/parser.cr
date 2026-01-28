@@ -1171,6 +1171,70 @@ module JustYAML
           end
           node
         end
+      when TokenType::Tag
+        # Tag on nested content
+        nested_tag = @current_token.value
+        advance
+        skip_whitespace_tokens
+
+        # Check for anchor after tag
+        nested_anchor = nil
+        if check(TokenType::Anchor)
+          nested_anchor = @current_token.value
+          advance
+          skip_whitespace_tokens
+        end
+
+        # Parse the tagged value
+        if check(TokenType::Scalar)
+          scalar = parse_scalar
+          skip_whitespace_tokens
+
+          if check(TokenType::ValueIndicator)
+            # Tagged key in a mapping
+            mapping = parse_block_mapping(scalar, next_col)
+            scalar.tag = nested_tag
+            if nested_anchor
+              scalar.anchor = nested_anchor
+              @anchors[nested_anchor] = scalar
+            end
+            return mapping
+          else
+            scalar.tag = nested_tag
+            if nested_anchor
+              scalar.anchor = nested_anchor
+              @anchors[nested_anchor] = scalar
+            end
+            return scalar
+          end
+        elsif check(TokenType::SequenceStart)
+          node = parse_flow_sequence
+          node.tag = nested_tag
+          if nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          return node
+        elsif check(TokenType::MappingStart)
+          node = parse_flow_mapping
+          node.tag = nested_tag
+          if nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          return node
+        else
+          # Tagged empty/null value
+          node = AST::ScalarNode.new("")
+          node.start_location = @current_token.location
+          node.end_location = @current_token.location
+          node.tag = nested_tag
+          if nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          return node
+        end
       else
         nil
       end
