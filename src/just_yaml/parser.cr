@@ -555,7 +555,14 @@ module JustYAML
           empty_line_count += 1
         else
           # Add this line as continuation
-          empty_line_count = append_continuation_line(lines, next_scalar.value, empty_line_count)
+          # Strip leading whitespace from continuation lines (YAML plain scalar folding)
+          continuation_value = next_scalar.value.lstrip
+          if continuation_value.empty?
+            # After stripping, if empty, treat as empty line
+            empty_line_count += 1
+          else
+            empty_line_count = append_continuation_line(lines, continuation_value, empty_line_count)
+          end
         end
       end
 
