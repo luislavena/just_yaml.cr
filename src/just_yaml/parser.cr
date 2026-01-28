@@ -58,8 +58,28 @@ module JustYAML
     private def parse_node(min_indent : Int32) : AST::Node
       skip_comments_and_newlines
 
-      # Handle anchor
+      # Parse anchor, tag, or alias that precedes the actual node
+      anchor, tag, alias_node = parse_node_properties
+
+      return alias_node if alias_node
+
+      node = parse_node_content(min_indent)
+
+      node.anchor = anchor
+      node.tag = tag
+
+      if anchor
+        @anchors[anchor] = node
+      end
+
+      node
+    end
+
+    private def parse_node_properties : {String?, String?, AST::Node?}
       anchor : String? = nil
+      tag : String? = nil
+
+      # Handle anchor
       if check(TokenType::Anchor)
         anchor = @current_token.value
         advance
@@ -67,7 +87,6 @@ module JustYAML
       end
 
       # Handle tag
-      tag : String? = nil
       if check(TokenType::Tag)
         tag = @current_token.value
         advance
@@ -85,35 +104,30 @@ module JustYAML
           raise ParseError.new("Unknown alias '#{alias_name}'", loc)
         end
 
-        return resolved
+        return {nil, nil, resolved}
       end
 
-      node = case @current_token.type
-             when TokenType::SequenceEntry
-               parse_block_sequence(min_indent)
-             when TokenType::Scalar
-               parse_mapping_or_scalar(min_indent)
-             when TokenType::SequenceStart
-               parse_flow_sequence
-             when TokenType::MappingStart
-               parse_flow_mapping
-             when TokenType::BlockScalarHeader
-               parse_block_scalar
-             else
-               raise ParseError.new(
-                 "Unexpected token #{@current_token.type}",
-                 @current_token.location
-               )
-             end
+      {anchor, tag, nil}
+    end
 
-      node.anchor = anchor
-      node.tag = tag
-
-      if anchor
-        @anchors[anchor] = node
+    private def parse_node_content(min_indent : Int32) : AST::Node
+      case @current_token.type
+      when TokenType::SequenceEntry
+        parse_block_sequence(min_indent)
+      when TokenType::Scalar
+        parse_mapping_or_scalar(min_indent)
+      when TokenType::SequenceStart
+        parse_flow_sequence
+      when TokenType::MappingStart
+        parse_flow_mapping
+      when TokenType::BlockScalarHeader
+        parse_block_scalar
+      else
+        raise ParseError.new(
+          "Unexpected token #{@current_token.type}",
+          @current_token.location
+        )
       end
-
-      node
     end
 
     private def parse_mapping_or_scalar(min_indent : Int32) : AST::Node
@@ -177,7 +191,59 @@ module JustYAML
     end
 
     private def parse_mapping_value(key_indent : Int32) : AST::Node?
-      # Same line value
+      # Check for anchor/tag/alias on value
+      anchor, tag, alias_node = parse_value_properties
+      return alias_node if alias_node
+
+      node = parse_mapping_value_content(key_indent, anchor, tag)
+
+      if node && anchor
+        node.anchor = anchor
+        @anchors[anchor] = node
+      end
+      if node && tag
+        node.tag = tag
+      end
+
+      node
+    end
+
+    private def parse_value_properties : {String?, String?, AST::Node?}
+      anchor : String? = nil
+      tag : String? = nil
+
+      # Handle anchor
+      if check(TokenType::Anchor)
+        anchor = @current_token.value
+        advance
+        skip_whitespace_tokens
+      end
+
+      # Handle tag
+      if check(TokenType::Tag)
+        tag = @current_token.value
+        advance
+        skip_whitespace_tokens
+      end
+
+      # Handle alias reference
+      if check(TokenType::Alias)
+        alias_name = @current_token.value
+        loc = @current_token.location
+        advance
+
+        resolved = @anchors[alias_name]?
+        unless resolved
+          raise ParseError.new("Unknown alias '#{alias_name}'", loc)
+        end
+
+        return {nil, nil, resolved}
+      end
+
+      {anchor, tag, nil}
+    end
+
+    private def parse_mapping_value_content(key_indent : Int32, anchor : String?, tag : String?) : AST::Node?
       case @current_token.type
       when TokenType::Scalar
         scalar = parse_scalar
@@ -195,6 +261,9 @@ module JustYAML
         parse_flow_mapping
       when TokenType::BlockScalarHeader
         parse_block_scalar
+      when TokenType::SequenceEntry
+        # Inline sequence entry (rare but valid)
+        parse_block_sequence(key_indent)
       when TokenType::Newline, TokenType::Comment
         # Value on next line (block collection)
         skip_comments_and_newlines
@@ -212,28 +281,43 @@ module JustYAML
         end
 
         # Nested block content
-        case @current_token.type
-        when TokenType::SequenceEntry
-          parse_block_sequence(next_col)
-        when TokenType::Scalar
-          # Check if this is a nested mapping
-          scalar = parse_scalar
-          skip_whitespace_tokens
-
-          if check(TokenType::ValueIndicator)
-            parse_block_mapping(scalar, next_col)
-          else
-            scalar
-          end
-        when TokenType::SequenceStart
-          parse_flow_sequence
-        when TokenType::MappingStart
-          parse_flow_mapping
-        else
-          nil
-        end
+        parse_nested_value(next_col, anchor, tag)
       when TokenType::StreamEnd
         nil
+      else
+        nil
+      end
+    end
+
+    private def parse_nested_value(next_col : Int32, anchor : String?, tag : String?) : AST::Node?
+      case @current_token.type
+      when TokenType::SequenceEntry
+        parse_block_sequence(next_col)
+      when TokenType::Scalar
+        # Check if this is a nested mapping
+        scalar = parse_scalar
+        skip_whitespace_tokens
+
+        if check(TokenType::ValueIndicator)
+          parse_block_mapping(scalar, next_col)
+        else
+          scalar
+        end
+      when TokenType::SequenceStart
+        parse_flow_sequence
+      when TokenType::MappingStart
+        parse_flow_mapping
+      when TokenType::Anchor
+        # Anchor on nested content
+        nested_anchor = @current_token.value
+        advance
+        skip_whitespace_tokens
+        node = parse_nested_value(next_col, nested_anchor, nil)
+        if node && nested_anchor
+          node.anchor = nested_anchor
+          @anchors[nested_anchor] = node
+        end
+        node
       else
         nil
       end
@@ -271,6 +355,24 @@ module JustYAML
     end
 
     private def parse_sequence_item(entry_indent : Int32) : AST::Node
+      # Check for anchor/tag on item
+      anchor, tag, alias_node = parse_value_properties
+      return alias_node if alias_node
+
+      node = parse_sequence_item_content(entry_indent)
+
+      if anchor
+        node.anchor = anchor
+        @anchors[anchor] = node
+      end
+      if tag
+        node.tag = tag
+      end
+
+      node
+    end
+
+    private def parse_sequence_item_content(entry_indent : Int32) : AST::Node
       case @current_token.type
       when TokenType::Scalar
         scalar = parse_scalar
@@ -406,17 +508,31 @@ module JustYAML
     private def parse_flow_node : AST::Node
       skip_flow_whitespace
 
-      case @current_token.type
-      when TokenType::Scalar
-        parse_scalar
-      when TokenType::SequenceStart
-        parse_flow_sequence
-      when TokenType::MappingStart
-        parse_flow_mapping
-      else
-        # Empty value
-        AST::ScalarNode.new("")
+      # Check for anchor/tag/alias
+      anchor, tag, alias_node = parse_value_properties
+      return alias_node if alias_node
+
+      node = case @current_token.type
+             when TokenType::Scalar
+               parse_scalar
+             when TokenType::SequenceStart
+               parse_flow_sequence
+             when TokenType::MappingStart
+               parse_flow_mapping
+             else
+               # Empty value
+               AST::ScalarNode.new("")
+             end
+
+      if anchor
+        node.anchor = anchor
+        @anchors[anchor] = node
       end
+      if tag
+        node.tag = tag
+      end
+
+      node
     end
 
     private def parse_block_scalar : AST::ScalarNode

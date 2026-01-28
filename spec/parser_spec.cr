@@ -229,6 +229,63 @@ describe JustYAML::Parser do
     end
   end
 
+  describe "anchors and aliases" do
+    it "parses anchor on scalar" do
+      yaml = "name: &anchor value"
+      ast = JustYAML.parse(yaml)
+      mapping = ast.documents.first.root.as(JustYAML::AST::MappingNode)
+      scalar = mapping.entries.first.value.as(JustYAML::AST::ScalarNode)
+      scalar.anchor.should eq("anchor")
+    end
+
+    it "resolves alias to anchored value" do
+      yaml = <<-YAML
+        original: &ref hello
+        copy: *ref
+        YAML
+
+      result = JustYAML.load(yaml)
+      result.should eq({"original" => "hello", "copy" => "hello"})
+    end
+
+    it "parses anchor on sequence" do
+      yaml = <<-YAML
+        items: &list
+          - one
+          - two
+        copy: *list
+        YAML
+
+      result = JustYAML.load(yaml)
+      result.should eq({
+        "items" => ["one", "two"],
+        "copy"  => ["one", "two"],
+      })
+    end
+
+    it "parses anchor on mapping" do
+      yaml = <<-YAML
+        person: &info
+          name: Alice
+          age: 30
+        copy: *info
+        YAML
+
+      result = JustYAML.load(yaml)
+      result.should eq({
+        "person" => {"name" => "Alice", "age" => "30"},
+        "copy"   => {"name" => "Alice", "age" => "30"},
+      })
+    end
+
+    it "raises error for unknown alias" do
+      yaml = "value: *unknown"
+      expect_raises(JustYAML::ParseError, /Unknown alias 'unknown'/) do
+        JustYAML.parse(yaml)
+      end
+    end
+  end
+
   describe "nested structures" do
     it "parses deeply nested mappings" do
       yaml = <<-YAML
