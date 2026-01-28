@@ -54,9 +54,29 @@ describe "YAML Test Suite" do
         if File.exists?(in_json_path)
           it "resolves to expected value" do
             expected_json = File.read(in_json_path)
-            expected = JSON.parse(expected_json)
+            # Handle multi-document YAML which has newline-separated JSON values
+            json_lines = expected_json.strip.split('\n').map(&.strip).reject(&.empty?)
+
+            # Try to parse as single JSON first, fall back to multi-doc
+            expected_values = begin
+              [JSON.parse(expected_json)]
+            rescue JSON::ParseException
+              # Multi-document: parse each line as separate JSON
+              json_lines.map { |line| JSON.parse(line) }
+            end
+
             actual = JustYAML.load(input)
-            compare_values(actual, expected)
+
+            if expected_values.size == 1
+              compare_values(actual, expected_values.first)
+            else
+              # Multi-document result should be an array
+              actual_arr = actual.as(Array)
+              actual_arr.size.should eq(expected_values.size)
+              actual_arr.zip(expected_values) do |a, e|
+                compare_values(a, e)
+              end
+            end
           end
         end
       end
