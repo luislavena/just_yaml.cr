@@ -447,14 +447,52 @@ module JustYAML
       when TokenType::Anchor
         # Anchor on nested content
         nested_anchor = @current_token.value
+        nested_anchor_loc = @current_token.location
         advance
         skip_whitespace_tokens
-        node = parse_nested_value(next_col, nested_anchor, nil)
-        if node && nested_anchor
-          node.anchor = nested_anchor
-          @anchors[nested_anchor] = node
+
+        # Now check what follows the anchor
+        # If it's a scalar followed by :, this is a mapping (anchor is on the key)
+        # If it's just a scalar, the anchor is on the value (check for duplicates)
+        if check(TokenType::Scalar)
+          # Peek ahead: parse the scalar and check for ValueIndicator
+          scalar = parse_scalar
+          skip_whitespace_tokens
+
+          if check(TokenType::ValueIndicator)
+            # This is a mapping entry with anchored key
+            # The outer anchor (if any) is on the mapping, inner anchor is on key
+            mapping = parse_block_mapping(scalar, next_col)
+            scalar.anchor = nested_anchor
+            @anchors[nested_anchor] = scalar
+
+            # Apply outer anchor to the mapping
+            if anchor
+              mapping.anchor = anchor
+              @anchors[anchor] = mapping
+            end
+            return mapping
+          else
+            # Just a scalar - check for duplicate anchor
+            if anchor
+              raise ParseError.new(
+                "Node cannot have multiple anchors (both '#{anchor}' and '#{nested_anchor}')",
+                nested_anchor_loc
+              )
+            end
+            scalar.anchor = nested_anchor
+            @anchors[nested_anchor] = scalar
+            return scalar
+          end
+        else
+          # Not a scalar - recursively parse
+          node = parse_nested_value(next_col, nested_anchor, nil)
+          if node && nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          node
         end
-        node
       else
         nil
       end
