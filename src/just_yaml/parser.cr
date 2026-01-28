@@ -603,7 +603,7 @@ module JustYAML
           key = parse_flow_node
           skip_flow_whitespace
 
-          # Expect colon
+          # Expect colon (or handle :value case where : is adjacent to value)
           value : AST::Node? = nil
           if check(TokenType::ValueIndicator)
             advance
@@ -611,6 +611,18 @@ module JustYAML
 
             unless check(TokenType::FlowSeparator) || check(TokenType::MappingEnd)
               value = parse_flow_node
+            end
+          elsif check(TokenType::Scalar) && @current_token.value.starts_with?(":")
+            # Handle case like { "key":value } where :value was lexed as a scalar
+            # Split it into value indicator + value
+            scalar_value = @current_token.value[1..]
+            advance
+
+            if !scalar_value.empty?
+              node = AST::ScalarNode.new(scalar_value, AST::ScalarStyle::Plain)
+              node.start_location = @current_token.location
+              node.end_location = @current_token.location
+              value = node
             end
           end
 
