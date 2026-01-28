@@ -66,6 +66,9 @@ module JustYAML
 
       return alias_node if alias_node
 
+      # Skip newlines after anchor/tag (content may be on next line)
+      skip_comments_and_newlines
+
       node = parse_node_content(min_indent)
 
       node.anchor = anchor
@@ -128,6 +131,9 @@ module JustYAML
       when TokenType::ValueIndicator
         # Implicit null key mapping (e.g., ": value")
         parse_block_mapping_with_null_key(min_indent)
+      when TokenType::KeyIndicator
+        # Explicit key mapping (e.g., "? key\n: value")
+        parse_block_mapping_with_explicit_key(min_indent)
       else
         raise ParseError.new(
           "Unexpected token #{@current_token.type}",
@@ -234,6 +240,83 @@ module JustYAML
 
       mapping.end_location = @current_token.location
       mapping
+    end
+
+    private def parse_block_mapping_with_explicit_key(min_indent : Int32) : AST::MappingNode
+      mapping = AST::MappingNode.new
+      mapping.start_location = @current_token.location
+      mapping.style = AST::CollectionStyle::Block
+
+      key_indent = @current_token.location.column
+
+      loop do
+        expect(TokenType::KeyIndicator)
+        skip_whitespace_tokens
+
+        # Parse the key (can be any node, or implicit null)
+        key : AST::Node = if check(TokenType::Newline) || check(TokenType::ValueIndicator)
+          # Null key
+          null_key = AST::ScalarNode.new("")
+          null_key.start_location = @current_token.location
+          null_key.end_location = @current_token.location
+          null_key
+        else
+          parse_explicit_key_value(key_indent)
+        end
+
+        skip_comments_and_newlines
+
+        # Parse value (optional - may have : or be implicit null)
+        value : AST::Node? = nil
+        if check(TokenType::ValueIndicator)
+          advance
+          skip_whitespace_tokens
+
+          unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+                 check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+            value = parse_mapping_value(key_indent)
+          end
+        end
+
+        mapping.entries << AST::MappingEntry.new(key: key, value: value)
+
+        skip_comments_and_newlines
+
+        # Check if we're done
+        break if check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+
+        # Check indentation
+        next_col = @current_token.location.column
+        break if next_col < key_indent
+
+        # Continue if another explicit key follows
+        unless check(TokenType::KeyIndicator)
+          break
+        end
+      end
+
+      mapping.end_location = @current_token.location
+      mapping
+    end
+
+    private def parse_explicit_key_value(key_indent : Int32) : AST::Node
+      case @current_token.type
+      when TokenType::Scalar
+        parse_scalar
+      when TokenType::SequenceStart
+        parse_flow_sequence
+      when TokenType::MappingStart
+        parse_flow_mapping
+      else
+        # Default to empty scalar
+        null_key = AST::ScalarNode.new("")
+        null_key.start_location = @current_token.location
+        null_key.end_location = @current_token.location
+        null_key
+      end
     end
 
     private def parse_mapping_value(key_indent : Int32) : AST::Node?

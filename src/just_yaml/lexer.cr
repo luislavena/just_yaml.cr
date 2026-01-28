@@ -57,6 +57,8 @@ module JustYAML
         scan_flow_separator
       when '|', '>'
         scan_block_scalar_indicator
+      when '?'
+        scan_key_indicator_or_scalar
       else
         scan_scalar
       end
@@ -115,6 +117,25 @@ module JustYAML
       loc = current_location
       advance
       Token.new(TokenType::ValueIndicator, ":", loc)
+    end
+
+    private def scan_key_indicator_or_scalar : Token
+      loc = current_location
+      advance # consume ?
+
+      # ? followed by whitespace, newline, or EOF is a key indicator
+      if at_end? || current_char == ' ' || current_char == '\t' || current_char == '\n'
+        Token.new(TokenType::KeyIndicator, "?", loc)
+      else
+        # Otherwise it's part of a scalar (e.g., "?foo")
+        value = String.build do |str|
+          str << '?'
+          while !at_end? && !scalar_terminator?(current_char)
+            str << advance
+          end
+        end
+        Token.new(TokenType::Scalar, value.strip, loc)
+      end
     end
 
     private def scan_scalar : Token
