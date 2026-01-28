@@ -154,19 +154,25 @@ module JustYAML
       advance
 
       # : followed by non-indicator characters is a plain scalar (e.g., ":foo")
-      # : followed by whitespace, newline, EOF, or flow indicators is a value indicator
-      if at_end? || current_char == ' ' || current_char == '\t' || current_char == '\n' ||
-         current_char == ',' || current_char == ']' || current_char == '}'
+      # : followed by whitespace, newline, or EOF is a value indicator
+      # : followed by flow indicators (,]}) is a value indicator only in flow context
+      is_value_indicator = at_end? || current_char == ' ' || current_char == '\t' || current_char == '\n'
+      if !is_value_indicator && @flow_level > 0
+        is_value_indicator = current_char == ',' || current_char == ']' || current_char == '}'
+      end
+
+      if is_value_indicator
         Token.new(TokenType::ValueIndicator, ":", loc)
       else
-        # Scan as scalar (e.g., ":foo" becomes the scalar value ":foo")
+        # Scan as scalar (e.g., ":foo" or ":," becomes scalar value)
         value = String.build do |str|
           str << ':'
           while !at_end? && !scalar_terminator_with_colon_check?(current_char)
             str << advance
           end
         end
-        Token.new(TokenType::Scalar, value.strip, loc)
+        # Strip trailing whitespace (not leading - preserve leading content like tabs)
+        Token.new(TokenType::Scalar, value.rstrip, loc)
       end
     end
 
