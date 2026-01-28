@@ -568,7 +568,7 @@ module JustYAML
 
       unless check(TokenType::SequenceEnd)
         loop do
-          item = parse_flow_node
+          item = parse_flow_sequence_item
           sequence.items << item
 
           skip_flow_whitespace
@@ -587,6 +587,58 @@ module JustYAML
       expect(TokenType::SequenceEnd)
       sequence.end_location = @current_token.location
       sequence
+    end
+
+    # Parse a flow sequence item, which might be an implicit mapping entry
+    private def parse_flow_sequence_item : AST::Node
+      skip_flow_whitespace
+      start_loc = @current_token.location
+
+      # Parse the first node
+      first_node = parse_flow_node
+      skip_flow_whitespace
+
+      # Check if this is an implicit mapping (key: value)
+      if check(TokenType::ValueIndicator)
+        advance
+        skip_flow_whitespace
+
+        # Parse value
+        value : AST::Node? = nil
+        unless check(TokenType::FlowSeparator) || check(TokenType::SequenceEnd)
+          value = parse_flow_node
+        end
+
+        # Create a mapping with single entry
+        mapping = AST::MappingNode.new
+        mapping.start_location = start_loc
+        mapping.end_location = @current_token.location
+        mapping.style = AST::CollectionStyle::Flow
+        mapping.entries << AST::MappingEntry.new(key: first_node, value: value)
+        return mapping
+      end
+
+      # Also handle case where lexer combined :value into a scalar
+      if check(TokenType::Scalar) && @current_token.value.starts_with?(":")
+        scalar_value = @current_token.value[1..]
+        advance
+
+        colon_value : AST::Node? = nil
+        if !scalar_value.empty?
+          colon_value = AST::ScalarNode.new(scalar_value, AST::ScalarStyle::Plain)
+          colon_value.start_location = @current_token.location
+          colon_value.end_location = @current_token.location
+        end
+
+        mapping = AST::MappingNode.new
+        mapping.start_location = start_loc
+        mapping.end_location = @current_token.location
+        mapping.style = AST::CollectionStyle::Flow
+        mapping.entries << AST::MappingEntry.new(key: first_node, value: colon_value)
+        return mapping
+      end
+
+      first_node
     end
 
     private def parse_flow_mapping : AST::MappingNode
