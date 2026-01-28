@@ -22,7 +22,11 @@ module JustYAML
         break if check(TokenType::StreamEnd)
 
         doc = parse_document(first_document || after_document_end)
-        stream.documents << doc
+        # Only add documents that have content or explicit markers
+        # Skip empty documents that only have document-end markers
+        if doc.root || doc.explicit_start
+          stream.documents << doc
+        end
         first_document = false
         after_document_end = doc.explicit_end
       end
