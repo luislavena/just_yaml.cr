@@ -1059,6 +1059,9 @@ module JustYAML
       case @current_token.type
       when TokenType::SequenceEntry
         parse_block_sequence(next_col)
+      when TokenType::KeyIndicator
+        # Explicit key mapping as nested value
+        parse_block_mapping_with_explicit_key(next_col)
       when TokenType::Scalar
         # Check if this is a nested mapping
         scalar = parse_scalar
