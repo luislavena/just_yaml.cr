@@ -887,6 +887,8 @@ module JustYAML
         parse_flow_sequence
       when TokenType::MappingStart
         parse_flow_mapping
+      when TokenType::BlockScalarHeader
+        parse_block_scalar(key_indent)
       else
         # Default to empty scalar
         null_key = AST::ScalarNode.new("")
