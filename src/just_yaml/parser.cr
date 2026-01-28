@@ -182,8 +182,99 @@ module JustYAML
       if check(TokenType::ValueIndicator)
         parse_block_mapping(first_scalar, min_indent)
       else
-        first_scalar
+        # Check for multiline plain scalar continuation
+        parse_multiline_plain_scalar(first_scalar, min_indent)
       end
+    end
+
+    # Parse multiline plain scalar by checking for continuation lines
+    private def parse_multiline_plain_scalar(first_scalar : AST::ScalarNode, min_indent : Int32) : AST::Node
+      # Only plain scalars can span multiple lines
+      return first_scalar unless first_scalar.style == AST::ScalarStyle::Plain
+
+      scalar_indent = first_scalar.start_location.column
+      lines = [first_scalar.value]
+      empty_line_count = 0
+
+      loop do
+        # Check for newline followed by potential continuation
+        break unless check(TokenType::Newline) || check(TokenType::Comment)
+
+        # Track empty lines (they become newlines in folded text)
+        while check(TokenType::Newline)
+          advance
+          # Count empty lines for later
+          if check(TokenType::Newline) || check(TokenType::StreamEnd)
+            empty_line_count += 1
+          end
+        end
+
+        # Skip comments (they don't count as content)
+        if check(TokenType::Comment)
+          advance
+          next
+        end
+
+        # Check if we should stop
+        break if check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+
+        # Check indentation of next content
+        next_col = @current_token.location.column
+        break if next_col < scalar_indent
+
+        # Check if next token is a scalar that continues the multiline value
+        break unless check(TokenType::Scalar)
+
+        # Look ahead to see if this scalar is a mapping key
+        saved_token = @current_token
+        next_scalar = parse_scalar
+        skip_whitespace_tokens
+
+        if check(TokenType::ValueIndicator)
+          # This scalar is a mapping key, not a continuation
+          # We need to backtrack - but we can't easily do that
+          # So instead, this means we have a scalar followed by a mapping
+          # which is invalid at the document level
+          # For now, just return what we have
+          # Actually, we consumed the token, so we have an issue
+          # Let me handle this differently - put back the scalar somehow
+          raise ParseError.new(
+            "Cannot have mapping key after multiline scalar at same indentation",
+            saved_token.location
+          )
+        end
+
+        # Add this line as continuation
+        if empty_line_count > 0
+          # Empty lines become literal newlines
+          lines << "\n" * empty_line_count
+          empty_line_count = 0
+        else
+          # Normal continuation - will be joined with space
+        end
+        lines << next_scalar.value
+      end
+
+      # If no continuation, just return original scalar
+      return first_scalar if lines.size == 1
+
+      # Build multiline scalar value
+      # Join with spaces, but preserve newlines from empty lines
+      result = String.build do |str|
+        lines.each_with_index do |line, idx|
+          if idx > 0 && !lines[idx - 1].ends_with?("\n") && !line.starts_with?("\n")
+            str << " "
+          end
+          str << line.gsub(/^\n+/) { |m| m } # Preserve leading newlines
+        end
+      end
+
+      scalar = AST::ScalarNode.new(result, AST::ScalarStyle::Plain)
+      scalar.start_location = first_scalar.start_location
+      scalar.end_location = @current_token.location
+      scalar
     end
 
     private def parse_block_mapping(first_key : AST::ScalarNode, min_indent : Int32) : AST::MappingNode
