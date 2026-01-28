@@ -1185,6 +1185,9 @@ module JustYAML
           skip_whitespace_tokens
         end
 
+        # Skip newlines - content may be on next line
+        skip_comments_and_newlines
+
         # Parse the tagged value
         if check(TokenType::Scalar)
           scalar = parse_scalar
@@ -1223,7 +1226,40 @@ module JustYAML
             @anchors[nested_anchor] = node
           end
           return node
+        elsif check(TokenType::SequenceEntry)
+          # Tagged block sequence
+          node = parse_block_sequence(@current_token.location.column)
+          node.tag = nested_tag
+          if nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          return node
+        elsif check(TokenType::KeyIndicator)
+          # Tagged explicit key mapping
+          node = parse_block_mapping_with_explicit_key(@current_token.location.column)
+          node.tag = nested_tag
+          if nested_anchor
+            node.anchor = nested_anchor
+            @anchors[nested_anchor] = node
+          end
+          return node
         else
+          # Check if there's a nested mapping (scalar followed by :)
+          content_col = @current_token.location.column
+          if content_col > key_indent
+            # Recursively parse the nested content
+            node = parse_nested_value(content_col, key_indent, nested_anchor, nested_tag)
+            if node
+              node.tag = nested_tag unless node.tag
+              if nested_anchor && !node.anchor
+                node.anchor = nested_anchor
+                @anchors[nested_anchor] = node
+              end
+            end
+            return node
+          end
+
           # Tagged empty/null value
           node = AST::ScalarNode.new("")
           node.start_location = @current_token.location
