@@ -45,12 +45,11 @@ module JustYAML
         skip_comments_and_newlines
       end
 
-      # If we had directives but no document content follows, it's an error
-      if had_directives
-        if check(TokenType::StreamEnd)
+      # If we had directives but no document marker follows, it's an error
+      # An empty document (--- ... ---) after a directive is valid
+      if had_directives && !doc.explicit_start
+        if check(TokenType::StreamEnd) || check(TokenType::DocumentEnd)
           raise ParseError.new("Directive(s) without following document", doc.start_location)
-        elsif check(TokenType::DocumentEnd)
-          raise ParseError.new("Directive(s) without following document content", doc.start_location)
         end
       end
 
