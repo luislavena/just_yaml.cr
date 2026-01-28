@@ -224,7 +224,23 @@ module JustYAML
         next_col = @current_token.location.column
         break if next_col < scalar_indent
 
-        # Check if next token is a scalar that continues the multiline value
+        # For continuation lines that are MORE indented, consume all tokens
+        # as literal text (indicators become literal chars in this context)
+        if next_col > scalar_indent
+          line_content = consume_plain_scalar_continuation_line
+          if line_content
+            if empty_line_count > 0
+              lines << "\n" * empty_line_count
+              empty_line_count = 0
+            end
+            lines << line_content
+            next
+          else
+            break
+          end
+        end
+
+        # At same indentation, only continue if it's a plain scalar
         break unless check(TokenType::Scalar)
 
         # Look ahead to see if this scalar is a mapping key
@@ -234,12 +250,6 @@ module JustYAML
 
         if check(TokenType::ValueIndicator)
           # This scalar is a mapping key, not a continuation
-          # We need to backtrack - but we can't easily do that
-          # So instead, this means we have a scalar followed by a mapping
-          # which is invalid at the document level
-          # For now, just return what we have
-          # Actually, we consumed the token, so we have an issue
-          # Let me handle this differently - put back the scalar somehow
           raise ParseError.new(
             "Cannot have mapping key after multiline scalar at same indentation",
             saved_token.location
@@ -248,11 +258,8 @@ module JustYAML
 
         # Add this line as continuation
         if empty_line_count > 0
-          # Empty lines become literal newlines
           lines << "\n" * empty_line_count
           empty_line_count = 0
-        else
-          # Normal continuation - will be joined with space
         end
         lines << next_scalar.value
       end
@@ -275,6 +282,44 @@ module JustYAML
       scalar.start_location = first_scalar.start_location
       scalar.end_location = @current_token.location
       scalar
+    end
+
+    # Consume tokens on a continuation line and return as literal text
+    # In multiline plain scalar context, indicators become literal characters
+    private def consume_plain_scalar_continuation_line : String?
+      parts = [] of String
+      start_line = @current_token.location.line
+
+      while @current_token.location.line == start_line
+        case @current_token.type
+        when TokenType::Scalar
+          parts << @current_token.value
+          advance
+        when TokenType::Anchor
+          parts << "&#{@current_token.value}"
+          advance
+        when TokenType::Alias
+          parts << "*#{@current_token.value}"
+          advance
+        when TokenType::Tag
+          parts << @current_token.value
+          advance
+        when TokenType::ValueIndicator
+          parts << ":"
+          advance
+        when TokenType::KeyIndicator
+          parts << "?"
+          advance
+        when TokenType::Newline, TokenType::Comment, TokenType::StreamEnd,
+             TokenType::DocumentStart, TokenType::DocumentEnd
+          break
+        else
+          break
+        end
+      end
+
+      return nil if parts.empty?
+      parts.join(" ")
     end
 
     private def parse_block_mapping(first_key : AST::ScalarNode, min_indent : Int32) : AST::MappingNode
