@@ -854,7 +854,7 @@ module JustYAML
         end
 
         # Nested block content
-        parse_nested_value(next_col, anchor, tag)
+        parse_nested_value(next_col, key_indent, anchor, tag)
       when TokenType::StreamEnd
         nil
       else
@@ -862,7 +862,7 @@ module JustYAML
       end
     end
 
-    private def parse_nested_value(next_col : Int32, anchor : String?, tag : String?) : AST::Node?
+    private def parse_nested_value(next_col : Int32, key_indent : Int32, anchor : String?, tag : String?) : AST::Node?
       case @current_token.type
       when TokenType::SequenceEntry
         parse_block_sequence(next_col)
@@ -874,7 +874,8 @@ module JustYAML
         if check(TokenType::ValueIndicator)
           parse_block_mapping(scalar, next_col)
         else
-          scalar
+          # Check for multiline plain scalar continuation
+          fold_multiline_plain_scalar(scalar, mode: MultilineScalarMode::Mapping, key_indent: key_indent)
         end
       when TokenType::SequenceStart
         parse_flow_sequence
@@ -941,7 +942,7 @@ module JustYAML
           end
         else
           # Not a scalar - recursively parse
-          node = parse_nested_value(next_col, nested_anchor, nil)
+          node = parse_nested_value(next_col, key_indent, nested_anchor, nil)
           if node && nested_anchor
             node.anchor = nested_anchor
             @anchors[nested_anchor] = node
