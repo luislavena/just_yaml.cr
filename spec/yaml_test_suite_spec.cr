@@ -54,16 +54,9 @@ describe "YAML Test Suite" do
         if File.exists?(in_json_path)
           it "resolves to expected value" do
             expected_json = File.read(in_json_path)
-            # Handle multi-document YAML which has newline-separated JSON values
-            json_lines = expected_json.strip.split('\n').map(&.strip).reject(&.empty?)
 
-            # Try to parse as single JSON first, fall back to multi-doc
-            expected_values = begin
-              [JSON.parse(expected_json)]
-            rescue JSON::ParseException
-              # Multi-document: parse each line as separate JSON
-              json_lines.map { |line| JSON.parse(line) }
-            end
+            # Parse all JSON values from the file (handles multi-document)
+            expected_values = parse_multiple_json_values(expected_json)
 
             actual = JustYAML.load(input)
 
@@ -82,6 +75,114 @@ describe "YAML Test Suite" do
       end
     end
   end
+end
+
+# Parse multiple JSON values from a string
+private def parse_multiple_json_values(json_str : String) : Array(JSON::Any)
+  results = [] of JSON::Any
+  pos = 0
+  str = json_str
+
+  while pos < str.bytesize
+    # Skip whitespace
+    while pos < str.bytesize && str[pos].whitespace?
+      pos += 1
+    end
+
+    break if pos >= str.bytesize
+
+    # Determine the end of the current JSON value
+    start_char = str[pos]
+
+    value_end = case start_char
+                when '"'
+                  # String: find matching unescaped quote
+                  find_string_end(str, pos)
+                when '{', '['
+                  # Object/Array: find matching bracket
+                  find_bracket_end(str, pos)
+                when 't'
+                  pos + 4 # true
+                when 'f'
+                  pos + 5 # false
+                when 'n'
+                  pos + 4 # null
+                else
+                  # Number: find end of number
+                  find_number_end(str, pos)
+                end
+
+    # Extract and parse the value
+    value_str = str[pos...value_end]
+    begin
+      result = JSON.parse(value_str)
+      results << result
+      pos = value_end
+    rescue JSON::ParseException
+      break
+    end
+  end
+
+  results
+end
+
+private def find_string_end(str : String, start : Int32) : Int32
+  pos = start + 1 # Skip opening quote
+  while pos < str.bytesize
+    if str[pos] == '\\'
+      pos += 2 # Skip escaped char
+    elsif str[pos] == '"'
+      return pos + 1
+    else
+      pos += 1
+    end
+  end
+  str.bytesize
+end
+
+private def find_bracket_end(str : String, start : Int32) : Int32
+  open_bracket = str[start]
+  close_bracket = open_bracket == '{' ? '}' : ']'
+  depth = 0
+  in_string = false
+  pos = start
+
+  while pos < str.bytesize
+    char = str[pos]
+    if in_string
+      if char == '\\'
+        pos += 1 # Skip next char
+      elsif char == '"'
+        in_string = false
+      end
+    else
+      case char
+      when '"'
+        in_string = true
+      when open_bracket
+        depth += 1
+      when close_bracket
+        depth -= 1
+        if depth == 0
+          return pos + 1
+        end
+      end
+    end
+    pos += 1
+  end
+
+  str.bytesize
+end
+
+private def find_number_end(str : String, start : Int32) : Int32
+  pos = start
+  while pos < str.bytesize
+    char = str[pos]
+    break unless char == '-' || char == '+' || char == '.' ||
+                 char == 'e' || char == 'E' || char.number?
+    pos += 1
+  end
+  pos
 end
 
 # Helper to compare JustYAML::Any with JSON::Any
