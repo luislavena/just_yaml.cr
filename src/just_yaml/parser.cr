@@ -1491,6 +1491,9 @@ module JustYAML
       anchor, tag, alias_node = parse_value_properties
       return alias_node if alias_node
 
+      # Skip whitespace after properties (tag/anchor may be on different line than value)
+      skip_flow_whitespace
+
       node = case @current_token.type
              when TokenType::Scalar
                parse_scalar
