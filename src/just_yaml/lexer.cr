@@ -207,6 +207,8 @@ module JustYAML
       advance # consume opening '
 
       value = String.build do |str|
+        trailing_ws = String::Builder.new
+
         loop do
           if at_end?
             raise LexerError.new("Unterminated single-quoted string", loc)
@@ -217,19 +219,33 @@ module JustYAML
             advance # consume the quote
             if current_char == '\''
               # Escaped single quote ('') becomes literal '
+              str << trailing_ws.to_s
+              trailing_ws = String::Builder.new
               str << advance
             else
-              # End of string
+              # End of string - keep trailing whitespace before closing quote
+              str << trailing_ws.to_s
               break
             end
           elsif char == '\n'
-            str << advance # include the newline
+            # Strip trailing whitespace before line break
+            trailing_ws = String::Builder.new
+            advance # consume newline
 
             # Check for document markers at start of line (forbidden in strings)
             if @column == 1 && check_document_marker?
               raise LexerError.new("Unterminated single-quoted string (document marker encountered)", loc)
             end
+
+            # Handle line folding
+            str << fold_single_quoted_line
+          elsif char == ' ' || char == '\t'
+            # Track trailing whitespace
+            trailing_ws << advance
           else
+            # Regular character - flush trailing whitespace
+            str << trailing_ws.to_s
+            trailing_ws = String::Builder.new
             str << advance
           end
         end
@@ -298,10 +314,10 @@ module JustYAML
       Token.new(TokenType::Scalar, value, loc, ScalarTokenStyle::DoubleQuoted)
     end
 
-    # Handle line folding in double-quoted strings
+    # Handle line folding in quoted strings (single or double quoted)
     # - Skip leading whitespace on continuation line
     # - Return space for normal fold, newline for empty line
-    private def fold_double_quoted_line : String
+    private def fold_quoted_line : String
       # Check if this line is empty (only whitespace before newline)
       result = String.build do |str|
         # Count consecutive empty lines (newlines followed by whitespace only)
@@ -331,6 +347,15 @@ module JustYAML
         end
       end
       result
+    end
+
+    # Aliases for clarity
+    private def fold_single_quoted_line : String
+      fold_quoted_line
+    end
+
+    private def fold_double_quoted_line : String
+      fold_quoted_line
     end
 
     private def scan_escape_sequence(string_start_loc : Location) : Char | String
