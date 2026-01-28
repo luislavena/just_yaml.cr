@@ -607,7 +607,9 @@ module JustYAML
       end
 
       return nil if parts.empty?
-      parts.join(" ")
+      # Strip trailing whitespace from the joined result
+      # (plain scalars don't preserve trailing whitespace)
+      parts.join(" ").rstrip
     end
 
     # Parse multiline plain scalar in sequence item context
