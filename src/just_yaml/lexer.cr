@@ -156,8 +156,30 @@ module JustYAML
     private def scan_scalar : Token
       loc = current_location
       value = String.build do |str|
+        trailing_ws = String::Builder.new
+
         while !at_end? && !scalar_terminator?(current_char)
-          str << advance
+          char = current_char
+          if char == ' ' || char == '\t'
+            # Track trailing whitespace
+            trailing_ws << advance
+          elsif char == '#'
+            # # after whitespace is a comment - stop scanning
+            if trailing_ws.empty?
+              # # at start or after non-whitespace is part of scalar
+              str << trailing_ws.to_s
+              trailing_ws = String::Builder.new
+              str << advance
+            else
+              # Comment starts here - don't include trailing whitespace
+              break
+            end
+          else
+            # Regular character - flush trailing whitespace and add char
+            str << trailing_ws.to_s
+            trailing_ws = String::Builder.new
+            str << advance
+          end
         end
       end
       Token.new(TokenType::Scalar, value.strip, loc)
