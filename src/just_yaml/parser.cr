@@ -94,6 +94,9 @@ module JustYAML
     private def parse_node(min_indent : Int32) : AST::Node
       skip_comments_and_newlines
 
+      # Track where node properties start (for mapping indent detection)
+      entry_start_col = @current_token.location.column
+
       # Parse anchor, tag, or alias that precedes the actual node
       anchor, tag, alias_node = parse_node_properties
 
@@ -102,14 +105,8 @@ module JustYAML
       # Skip newlines after anchor/tag (content may be on next line)
       skip_comments_and_newlines
 
-      node = parse_node_content(min_indent)
-
-      node.anchor = anchor
-      node.tag = tag
-
-      if anchor
-        @anchors[anchor] = node
-      end
+      # Pass anchor/tag info so mapping can apply it to the key if appropriate
+      node = parse_node_content_with_properties(min_indent, entry_start_col, anchor, tag)
 
       node
     end
@@ -150,23 +147,37 @@ module JustYAML
     end
 
     private def parse_node_content(min_indent : Int32) : AST::Node
+      parse_node_content_with_properties(min_indent, @current_token.location.column, nil, nil)
+    end
+
+    private def parse_node_content_with_entry_start(min_indent : Int32, entry_start_col : Int32) : AST::Node
+      parse_node_content_with_properties(min_indent, entry_start_col, nil, nil)
+    end
+
+    private def parse_node_content_with_properties(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?) : AST::Node
       case @current_token.type
       when TokenType::SequenceEntry
-        parse_block_sequence(min_indent)
+        node = parse_block_sequence(min_indent)
+        apply_node_properties(node, anchor, tag)
       when TokenType::Scalar
-        parse_mapping_or_scalar(min_indent)
+        parse_mapping_or_scalar_with_properties(min_indent, entry_start_col, anchor, tag)
       when TokenType::SequenceStart
-        parse_flow_sequence
+        node = parse_flow_sequence
+        apply_node_properties(node, anchor, tag)
       when TokenType::MappingStart
-        parse_flow_mapping
+        node = parse_flow_mapping
+        apply_node_properties(node, anchor, tag)
       when TokenType::BlockScalarHeader
-        parse_block_scalar(min_indent)
+        node = parse_block_scalar(min_indent)
+        apply_node_properties(node, anchor, tag)
       when TokenType::ValueIndicator
         # Implicit null key mapping (e.g., ": value")
-        parse_block_mapping_with_null_key(min_indent)
+        node = parse_block_mapping_with_null_key(min_indent)
+        apply_node_properties(node, anchor, tag)
       when TokenType::KeyIndicator
         # Explicit key mapping (e.g., "? key\n: value")
-        parse_block_mapping_with_explicit_key(min_indent)
+        node = parse_block_mapping_with_explicit_key(min_indent)
+        apply_node_properties(node, anchor, tag)
       else
         raise ParseError.new(
           "Unexpected token #{@current_token.type}",
@@ -175,15 +186,39 @@ module JustYAML
       end
     end
 
+    private def apply_node_properties(node : AST::Node, anchor : String?, tag : String?) : AST::Node
+      if anchor
+        node.anchor = anchor
+        @anchors[anchor] = node
+      end
+      node.tag = tag if tag
+      node
+    end
+
     private def parse_mapping_or_scalar(min_indent : Int32) : AST::Node
+      parse_mapping_or_scalar_with_properties(min_indent, @current_token.location.column, nil, nil)
+    end
+
+    private def parse_mapping_or_scalar_with_entry_start(min_indent : Int32, entry_start_col : Int32) : AST::Node
+      parse_mapping_or_scalar_with_properties(min_indent, entry_start_col, nil, nil)
+    end
+
+    private def parse_mapping_or_scalar_with_properties(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?) : AST::Node
       first_scalar = parse_scalar
       skip_whitespace_tokens
 
       if check(TokenType::ValueIndicator)
-        parse_block_mapping(first_scalar, min_indent)
+        # This is a mapping - apply anchor/tag to the KEY, not the mapping
+        if anchor
+          first_scalar.anchor = anchor
+          @anchors[anchor] = first_scalar
+        end
+        first_scalar.tag = tag if tag
+        parse_block_mapping_with_entry_start(first_scalar, min_indent, entry_start_col)
       else
-        # Check for multiline plain scalar continuation
-        parse_multiline_plain_scalar(first_scalar, min_indent)
+        # Just a scalar - apply anchor/tag to it
+        node = parse_multiline_plain_scalar(first_scalar, min_indent)
+        apply_node_properties(node, anchor, tag)
       end
     end
 
@@ -557,11 +592,16 @@ module JustYAML
     end
 
     private def parse_block_mapping(first_key : AST::ScalarNode, min_indent : Int32) : AST::MappingNode
+      parse_block_mapping_with_entry_start(first_key, min_indent, first_key.start_location.column)
+    end
+
+    private def parse_block_mapping_with_entry_start(first_key : AST::ScalarNode, min_indent : Int32, entry_start_col : Int32) : AST::MappingNode
       mapping = AST::MappingNode.new
       mapping.start_location = first_key.start_location
       mapping.style = AST::CollectionStyle::Block
 
-      key_indent = first_key.start_location.column
+      # Use entry_start_col for mapping indent (handles anchors/tags before key)
+      key_indent = entry_start_col
       key : AST::Node = first_key
 
       loop do
