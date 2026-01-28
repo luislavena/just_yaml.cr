@@ -84,13 +84,28 @@ module JustYAML
       when '['
         scan_sequence_start
       when ']'
-        scan_sequence_end
+        # Only treat ] as SequenceEnd when inside a flow context
+        if @flow_level > 0
+          scan_sequence_end
+        else
+          scan_scalar
+        end
       when '{'
         scan_mapping_start
       when '}'
-        scan_mapping_end
+        # Only treat } as MappingEnd when inside a flow context
+        if @flow_level > 0
+          scan_mapping_end
+        else
+          scan_scalar
+        end
       when ','
-        scan_flow_separator
+        # Only treat , as FlowSeparator when inside a flow context
+        if @flow_level > 0
+          scan_flow_separator
+        else
+          scan_scalar
+        end
       when '|', '>'
         scan_block_scalar_indicator
       when '?'
@@ -786,7 +801,8 @@ module JustYAML
     end
 
     private def tag_terminator?(char : Char) : Bool
-      char == ' ' || char == '\t' || char == '\n' || char == ':'
+      char == ' ' || char == '\t' || char == '\n' || char == ':' ||
+        char == ',' || char == '[' || char == ']' || char == '{' || char == '}'
     end
 
     private def scan_sequence_start : Token
