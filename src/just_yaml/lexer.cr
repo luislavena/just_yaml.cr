@@ -647,16 +647,9 @@ module JustYAML
       loc = current_location
       advance # consume &
 
-      # & followed by whitespace is a plain scalar, not an anchor
+      # & must be followed by valid anchor name characters
       if at_end? || !valid_anchor_alias_char?(current_char)
-        # Scan as scalar
-        value = String.build do |str|
-          str << '&'
-          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
-            str << advance
-          end
-        end
-        return Token.new(TokenType::Scalar, value.rstrip, loc)
+        raise LexerError.new("Invalid anchor name: must contain valid characters", loc)
       end
 
       name = scan_anchor_alias_name(loc, "anchor")
@@ -667,16 +660,9 @@ module JustYAML
       loc = current_location
       advance # consume *
 
-      # * followed by whitespace is a plain scalar, not an alias
+      # * must be followed by valid alias name characters
       if at_end? || !valid_anchor_alias_char?(current_char)
-        # Scan as scalar
-        value = String.build do |str|
-          str << '*'
-          while !at_end? && !scalar_terminator_with_colon_check?(current_char)
-            str << advance
-          end
-        end
-        return Token.new(TokenType::Scalar, value.rstrip, loc)
+        raise LexerError.new("Invalid alias name: must contain valid characters", loc)
       end
 
       name = scan_anchor_alias_name(loc, "alias")
