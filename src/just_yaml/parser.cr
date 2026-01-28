@@ -819,7 +819,7 @@ module JustYAML
             implicit_value : AST::Node? = nil
             unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
                    check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
-                   check(TokenType::DocumentEnd) || check(TokenType::Scalar)
+                   check(TokenType::DocumentEnd)
               implicit_value = parse_mapping_value(key_indent)
             end
 
