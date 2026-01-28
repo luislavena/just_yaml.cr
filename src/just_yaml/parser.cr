@@ -1335,30 +1335,71 @@ module JustYAML
 
       unless check(TokenType::MappingEnd)
         loop do
-          # Parse key
-          key = parse_flow_node
-          skip_flow_whitespace
-
-          # Expect colon (or handle :value case where : is adjacent to value)
+          key : AST::Node
           value : AST::Node? = nil
-          if check(TokenType::ValueIndicator)
+
+          if check(TokenType::KeyIndicator)
+            # Explicit key: ? key : value
+            advance
+            skip_flow_whitespace
+
+            # Parse key (or empty key)
+            if check(TokenType::ValueIndicator) || check(TokenType::FlowSeparator) || check(TokenType::MappingEnd)
+              key = AST::ScalarNode.new("")
+              key.start_location = @current_token.location
+              key.end_location = @current_token.location
+            else
+              key = parse_flow_node
+            end
+
+            skip_flow_whitespace
+
+            # Parse value if there's a colon
+            if check(TokenType::ValueIndicator)
+              advance
+              skip_flow_whitespace
+
+              unless check(TokenType::FlowSeparator) || check(TokenType::MappingEnd)
+                value = parse_flow_node
+              end
+            end
+          elsif check(TokenType::ValueIndicator)
+            # Empty key: : value
+            key = AST::ScalarNode.new("")
+            key.start_location = @current_token.location
+            key.end_location = @current_token.location
+
             advance
             skip_flow_whitespace
 
             unless check(TokenType::FlowSeparator) || check(TokenType::MappingEnd)
               value = parse_flow_node
             end
-          elsif check(TokenType::Scalar) && @current_token.value.starts_with?(":")
-            # Handle case like { "key":value } where :value was lexed as a scalar
-            # Split it into value indicator + value
-            scalar_value = @current_token.value[1..]
-            advance
+          else
+            # Regular key: value
+            key = parse_flow_node
+            skip_flow_whitespace
 
-            if !scalar_value.empty?
-              node = AST::ScalarNode.new(scalar_value, AST::ScalarStyle::Plain)
-              node.start_location = @current_token.location
-              node.end_location = @current_token.location
-              value = node
+            # Expect colon (or handle :value case where : is adjacent to value)
+            if check(TokenType::ValueIndicator)
+              advance
+              skip_flow_whitespace
+
+              unless check(TokenType::FlowSeparator) || check(TokenType::MappingEnd)
+                value = parse_flow_node
+              end
+            elsif check(TokenType::Scalar) && @current_token.value.starts_with?(":")
+              # Handle case like { "key":value } where :value was lexed as a scalar
+              # Split it into value indicator + value
+              scalar_value = @current_token.value[1..]
+              advance
+
+              if !scalar_value.empty?
+                node = AST::ScalarNode.new(scalar_value, AST::ScalarStyle::Plain)
+                node.start_location = @current_token.location
+                node.end_location = @current_token.location
+                value = node
+              end
             end
           end
 

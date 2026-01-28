@@ -248,6 +248,7 @@ module JustYAML
 
     # Check if character terminates a scalar, with special colon handling
     # Colon terminates when followed by whitespace, newline, or EOF
+    # In flow context, colon also terminates when followed by flow indicators
     private def scalar_terminator_with_colon_check?(char : Char) : Bool
       if char == ':'
         # Colon at end of input is a value indicator
@@ -257,7 +258,12 @@ module JustYAML
         @reader.next_char
         next_char = @reader.current_char
         @reader.pos = saved_pos
-        next_char == ' ' || next_char == '\t' || next_char == '\n' || next_char == '\0'
+        is_terminator = next_char == ' ' || next_char == '\t' || next_char == '\n' || next_char == '\0'
+        # In flow context, colon followed by flow indicators is also a value indicator
+        if !is_terminator && @flow_level > 0
+          is_terminator = next_char == ',' || next_char == ']' || next_char == '}'
+        end
+        is_terminator
       else
         scalar_terminator?(char)
       end
