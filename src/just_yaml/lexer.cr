@@ -209,6 +209,25 @@ module JustYAML
               # Comment starts here - don't include trailing whitespace
               break
             end
+          elsif char == '\n' && @flow_level > 0
+            # In flow context, check for multiline plain scalar continuation
+            advance # consume newline
+            @line += 1
+            @column = 1
+            trailing_ws = String::Builder.new
+
+            # Skip whitespace at start of new line
+            while !at_end? && (current_char == ' ' || current_char == '\t')
+              advance
+            end
+
+            # Check if we should continue or stop
+            if at_end? || flow_scalar_terminator?(current_char)
+              break
+            end
+
+            # Fold the newline into a space and continue
+            str << ' '
           else
             # Regular character - flush trailing whitespace and add char
             str << trailing_ws.to_s
@@ -220,6 +239,11 @@ module JustYAML
       # Note: trailing whitespace before terminators is already excluded by the loop
       # Leading whitespace (tabs, etc.) is content and should be preserved
       Token.new(TokenType::Scalar, value, loc)
+    end
+
+    # Check if character terminates a scalar in flow context
+    private def flow_scalar_terminator?(char : Char) : Bool
+      char == ',' || char == '[' || char == ']' || char == '{' || char == '}' || char == ':'
     end
 
     # Check if character terminates a scalar, with special colon handling
@@ -615,9 +639,10 @@ module JustYAML
 
     private def scalar_terminator?(char : Char) : Bool
       # In flow context, comma and brackets terminate scalars
+      # Newlines in flow context are handled specially (folded into spaces)
       # In block context, only newline and colon terminate (brackets are valid in plain scalars)
       if @flow_level > 0
-        char == '\n' || char == ':' || char == ',' ||
+        char == ':' || char == ',' ||
           char == '[' || char == ']' || char == '{' || char == '}'
       else
         char == '\n' || char == ':'
