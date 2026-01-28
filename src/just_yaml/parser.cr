@@ -921,15 +921,22 @@ module JustYAML
 
       # Collect lines with their raw content (preserving indentation info)
       lines = [] of {content: String, indent: Int32, is_empty: Bool}
-      content_indent = explicit_indent > 0 ? explicit_indent : -1
+      # Explicit indent specifies number of spaces; column is 1-indexed, so add 1
+      content_indent = explicit_indent > 0 ? explicit_indent + 1 : -1
 
       while !check(TokenType::StreamEnd) && !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd)
         if check(TokenType::Newline)
           # Empty line
           lines << {content: "", indent: 0, is_empty: true}
           advance
-        elsif check(TokenType::Scalar)
+        elsif check(TokenType::Scalar) || check(TokenType::Comment)
+          # In block scalars, comments are literal content (# is not special)
           line_col = @current_token.location.column
+          line_value = if check(TokenType::Comment)
+                         "#" + @current_token.value
+                       else
+                         @current_token.value
+                       end
 
           # Determine content indentation from first content line
           if content_indent < 0
@@ -944,7 +951,7 @@ module JustYAML
           # Calculate extra indentation (for more-indented lines)
           extra_indent = line_col > content_indent ? line_col - content_indent : 0
 
-          line_content = " " * extra_indent + @current_token.value
+          line_content = " " * extra_indent + line_value
           lines << {content: line_content, indent: line_col, is_empty: false}
           advance
 
