@@ -185,10 +185,18 @@ module JustYAML
           next_key_col = @current_token.location.column
           break if next_key_col != key_indent
 
+          # Look ahead to verify this is a mapping entry (has ValueIndicator)
+          # We need to check if a colon follows this scalar
+          saved_token = @current_token
           key = parse_scalar
           skip_whitespace_tokens
+
           unless check(TokenType::ValueIndicator)
-            break
+            # Not a mapping entry - this scalar is something else (error)
+            raise ParseError.new(
+              "Unexpected scalar '#{saved_token.value}' without mapping value",
+              saved_token.location
+            )
           end
         when TokenType::SequenceEntry
           # Block sequence at same level - not part of this mapping
