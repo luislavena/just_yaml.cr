@@ -5,6 +5,7 @@ module JustYAML
     @column : Int32 = 1
     @started : Bool = false
     @finished : Bool = false
+    @flow_level : Int32 = 0 # Track nesting level of flow collections
 
     def initialize(input : String)
       @reader = Char::Reader.new(input)
@@ -525,8 +526,15 @@ module JustYAML
     end
 
     private def scalar_terminator?(char : Char) : Bool
-      char == '\n' || char == ':' || char == ',' ||
-        char == '[' || char == ']' || char == '{' || char == '}'
+      # In flow context, comma and brackets terminate scalars
+      # In block context, only newline, colon, and brackets terminate
+      if @flow_level > 0
+        char == '\n' || char == ':' || char == ',' ||
+          char == '[' || char == ']' || char == '{' || char == '}'
+      else
+        char == '\n' || char == ':' ||
+          char == '[' || char == ']' || char == '{' || char == '}'
+      end
     end
 
     private def scan_comment : Token
@@ -629,24 +637,28 @@ module JustYAML
     private def scan_sequence_start : Token
       loc = current_location
       advance
+      @flow_level += 1
       Token.new(TokenType::SequenceStart, "[", loc)
     end
 
     private def scan_sequence_end : Token
       loc = current_location
       advance
+      @flow_level -= 1 if @flow_level > 0
       Token.new(TokenType::SequenceEnd, "]", loc)
     end
 
     private def scan_mapping_start : Token
       loc = current_location
       advance
+      @flow_level += 1
       Token.new(TokenType::MappingStart, "{", loc)
     end
 
     private def scan_mapping_end : Token
       loc = current_location
       advance
+      @flow_level -= 1 if @flow_level > 0
       Token.new(TokenType::MappingEnd, "}", loc)
     end
 
