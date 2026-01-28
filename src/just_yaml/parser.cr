@@ -499,14 +499,30 @@ module JustYAML
         next_col = @current_token.location.column
         break if next_col < key_indent
 
-        # Parse next key
+        # Parse next key (may have anchor/tag prefix)
+        entry_start = @current_token.location.column
+        next_key_anchor : String? = nil
+        next_key_tag : String? = nil
+
+        # Handle anchor/tag on key
+        if check(TokenType::Anchor)
+          next_key_anchor = @current_token.value
+          advance
+          skip_whitespace_tokens
+        end
+
+        if check(TokenType::Tag)
+          next_key_tag = @current_token.value
+          advance
+          skip_whitespace_tokens
+        end
+
         case @current_token.type
         when TokenType::Scalar
-          next_key_col = @current_token.location.column
-          break if next_key_col != key_indent
+          # Check if entry is at the correct indentation
+          break if entry_start != key_indent
 
           # Look ahead to verify this is a mapping entry (has ValueIndicator)
-          # We need to check if a colon follows this scalar
           saved_token = @current_token
           key = parse_scalar
           skip_whitespace_tokens
@@ -518,6 +534,13 @@ module JustYAML
               saved_token.location
             )
           end
+
+          # Apply anchor/tag to the key
+          if next_key_anchor
+            key.anchor = next_key_anchor
+            @anchors[next_key_anchor] = key
+          end
+          key.tag = next_key_tag if next_key_tag
         when TokenType::SequenceEntry
           # Block sequence at same level - not part of this mapping
           break
