@@ -230,16 +230,17 @@ module JustYAML
     end
 
     # Check if character terminates a scalar, with special colon handling
-    # Colon only terminates when followed by whitespace
+    # Colon terminates when followed by whitespace, newline, or EOF
     private def scalar_terminator_with_colon_check?(char : Char) : Bool
       if char == ':'
-        # Peek at next char to see if it's whitespace
-        return false unless @reader.has_next?
+        # Colon at end of input is a value indicator
+        return true unless @reader.has_next?
+        # Peek at next char to see if it's whitespace or EOF
         saved_pos = @reader.pos
         @reader.next_char
         next_char = @reader.current_char
         @reader.pos = saved_pos
-        next_char == ' ' || next_char == '\t' || next_char == '\n'
+        next_char == ' ' || next_char == '\t' || next_char == '\n' || next_char == '\0'
       else
         scalar_terminator?(char)
       end
