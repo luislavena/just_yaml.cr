@@ -24,17 +24,37 @@ module JustYAML
       end
 
       # Tab at start of indentation (column 1) is invalid for block indicators
-      # But tabs before flow indicators ({, [) are allowed
+      # But tabs before flow indicators ({, [) or plain scalar content are allowed
       if @column == 1 && current_char == '\t' && @flow_level == 0
         # Skip the tab(s) and check what follows
         tab_loc = current_location
         while current_char == '\t'
           advance
         end
-        # If followed by a flow indicator, the tabs were just whitespace (allowed)
-        # Otherwise, tabs were used as block indentation (error)
-        unless current_char == '[' || current_char == '{' || current_char == '\n' || at_end?
+        # Tab is invalid if followed by block indicators (-, ?, :)
+        # Tab is valid if followed by: flow indicators, newline, EOF, or scalar content
+        if current_char == '-' || current_char == '?' || current_char == ':'
           raise LexerError.new("Tab character cannot be used for indentation", tab_loc)
+        end
+        # Check if this looks like a mapping key (identifier followed by :)
+        # That would mean tabs are being used for indentation in a mapping
+        if !at_end? && current_char != '\n' && current_char != '[' && current_char != '{'
+          # Look ahead to see if this is a mapping key
+          saved_pos = @reader.pos
+          saved_line = @line
+          saved_col = @column
+          # Skip to potential colon
+          while !at_end? && current_char != '\n' && current_char != ':'
+            advance
+          end
+          is_mapping_key = !at_end? && current_char == ':'
+          # Restore position
+          @reader.pos = saved_pos
+          @line = saved_line
+          @column = saved_col
+          if is_mapping_key
+            raise LexerError.new("Tab character cannot be used for indentation", tab_loc)
+          end
         end
       end
 
