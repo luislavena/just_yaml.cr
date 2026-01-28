@@ -235,6 +235,11 @@ module JustYAML
         end
       end
 
+      # Comment without preceding whitespace after quoted scalar is an error
+      if !at_end? && current_char == '#'
+        raise LexerError.new("Comment must be preceded by whitespace after quoted scalar", loc)
+      end
+
       Token.new(TokenType::Scalar, value, loc, ScalarTokenStyle::SingleQuoted)
     end
 
@@ -283,6 +288,11 @@ module JustYAML
             str << advance
           end
         end
+      end
+
+      # Comment without preceding whitespace after quoted scalar is an error
+      if !at_end? && current_char == '#'
+        raise LexerError.new("Comment must be preceded by whitespace after quoted scalar", loc)
       end
 
       Token.new(TokenType::Scalar, value, loc, ScalarTokenStyle::DoubleQuoted)
@@ -543,13 +553,12 @@ module JustYAML
 
     private def scalar_terminator?(char : Char) : Bool
       # In flow context, comma and brackets terminate scalars
-      # In block context, only newline, colon, and brackets terminate
+      # In block context, only newline and colon terminate (brackets are valid in plain scalars)
       if @flow_level > 0
         char == '\n' || char == ':' || char == ',' ||
           char == '[' || char == ']' || char == '{' || char == '}'
       else
-        char == '\n' || char == ':' ||
-          char == '[' || char == ']' || char == '{' || char == '}'
+        char == '\n' || char == ':'
       end
     end
 
@@ -712,6 +721,12 @@ module JustYAML
             break
           end
         end
+      end
+
+      # After block scalar header, only whitespace, comment (with preceding space), or newline allowed
+      # A # directly after the header without whitespace is an error
+      if !at_end? && current_char == '#'
+        raise LexerError.new("Comment must be preceded by whitespace after block scalar indicator", loc)
       end
 
       Token.new(TokenType::BlockScalarHeader, value, loc)
