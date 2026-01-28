@@ -15,29 +15,43 @@ module JustYAML
 
       expect(TokenType::StreamStart)
 
+      first_document = true
+      after_document_end = true # First document acts as if after "end"
       while !check(TokenType::StreamEnd)
         skip_comments_and_newlines
         break if check(TokenType::StreamEnd)
 
-        stream.documents << parse_document
+        doc = parse_document(first_document || after_document_end)
+        stream.documents << doc
+        first_document = false
+        after_document_end = doc.explicit_end
       end
 
       stream.end_location = @current_token.location
       stream
     end
 
-    private def parse_document : AST::DocumentNode
+    private def parse_document(after_document_end : Bool = false) : AST::DocumentNode
       doc = AST::DocumentNode.new
       doc.start_location = @current_token.location
 
-      # Skip any directives before document
-      skip_directives
+      # Check for directives before document
+      had_directives = skip_directives_with_validation(after_document_end)
 
       # Check for explicit document start
       if check(TokenType::DocumentStart)
         doc.explicit_start = true
         advance
         skip_comments_and_newlines
+      end
+
+      # If we had directives but no document content follows, it's an error
+      if had_directives
+        if check(TokenType::StreamEnd)
+          raise ParseError.new("Directive(s) without following document", doc.start_location)
+        elsif check(TokenType::DocumentEnd)
+          raise ParseError.new("Directive(s) without following document content", doc.start_location)
+        end
       end
 
       # Parse document content (if any)
@@ -1144,6 +1158,19 @@ module JustYAML
       while check(TokenType::Directive) || check(TokenType::Newline) || check(TokenType::Comment)
         advance
       end
+    end
+
+    private def skip_directives_with_validation(after_document_end_or_first : Bool) : Bool
+      had_directives = false
+
+      while check(TokenType::Directive) || check(TokenType::Newline) || check(TokenType::Comment)
+        if check(TokenType::Directive)
+          had_directives = true
+        end
+        advance
+      end
+
+      had_directives
     end
 
     private def skip_comments_and_newlines : Nil
