@@ -512,7 +512,17 @@ module JustYAML
           end
         end
 
-        # At same indentation, only continue if it's a plain scalar
+        # At same indentation, continue if it's a plain scalar or directive-like content
+        if check(TokenType::Directive)
+          # Directive at same indentation is continuation content
+          # (it's only a real directive if at start of stream or after document end)
+          empty_line_count = append_continuation_line(lines, @current_token.value, empty_line_count)
+          advance
+          # Skip the newline after the directive
+          advance if check(TokenType::Newline)
+          next
+        end
+
         break unless check(TokenType::Scalar)
 
         # Look ahead to see if this scalar is a mapping key
