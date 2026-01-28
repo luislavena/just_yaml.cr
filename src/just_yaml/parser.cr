@@ -734,6 +734,25 @@ module JustYAML
             @anchors[next_key_anchor] = key
           end
           key.tag = next_key_tag if next_key_tag
+        when TokenType::Alias
+          # Alias as mapping key
+          break if entry_start != key_indent
+
+          alias_name = @current_token.value
+          alias_loc = @current_token.location
+          advance
+          skip_whitespace_tokens
+
+          resolved = @anchors[alias_name]?
+          unless resolved
+            raise ParseError.new("Unknown alias '#{alias_name}'", alias_loc)
+          end
+
+          key = resolved
+
+          unless check(TokenType::ValueIndicator)
+            break
+          end
         when TokenType::SequenceEntry
           # Block sequence at same level - not part of this mapping
           break
