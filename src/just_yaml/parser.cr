@@ -217,14 +217,14 @@ module JustYAML
         parse_block_mapping_with_entry_start(first_scalar, min_indent, entry_start_col)
       else
         # Just a scalar - apply anchor/tag to it
-        node = parse_multiline_plain_scalar(first_scalar, min_indent)
+        node = parse_multiline_plain_scalar(first_scalar)
         apply_node_properties(node, anchor, tag)
       end
     end
 
     # Parse multiline plain scalar by checking for continuation lines
-    private def parse_multiline_plain_scalar(first_scalar : AST::ScalarNode, min_indent : Int32) : AST::Node
-      fold_multiline_plain_scalar(first_scalar, min_indent: min_indent)
+    private def parse_multiline_plain_scalar(first_scalar : AST::ScalarNode) : AST::Node
+      fold_multiline_plain_scalar(first_scalar)
     end
 
     # Mode for multiline plain scalar parsing context
@@ -271,11 +271,15 @@ module JustYAML
 
     # Shared helper for parsing multiline plain scalars across all contexts
     # Returns the folded scalar node or the original if no continuation found
+    #
+    # Parameters:
+    # - mode: parsing context (Root uses scalar column, Sequence/Mapping use indent params)
+    # - entry_indent: for Sequence mode, the column of the sequence entry indicator
+    # - key_indent: for Mapping mode, the column of the mapping key
     private def fold_multiline_plain_scalar(
       first_scalar : AST::ScalarNode,
       *,
       mode : MultilineScalarMode = MultilineScalarMode::Root,
-      min_indent : Int32 = -1,
       entry_indent : Int32 = -1,
       key_indent : Int32 = -1,
     ) : AST::Node
