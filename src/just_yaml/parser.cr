@@ -115,18 +115,19 @@ module JustYAML
       anchor : String? = nil
       tag : String? = nil
 
-      # Handle anchor
-      if check(TokenType::Anchor)
-        anchor = @current_token.value
-        advance
-        skip_whitespace_tokens
-      end
-
-      # Handle tag
-      if check(TokenType::Tag)
-        tag = @current_token.value
-        advance
-        skip_whitespace_tokens
+      # Handle anchor and tag in any order
+      loop do
+        if check(TokenType::Anchor) && anchor.nil?
+          anchor = @current_token.value
+          advance
+          skip_whitespace_tokens
+        elsif check(TokenType::Tag) && tag.nil?
+          tag = @current_token.value
+          advance
+          skip_whitespace_tokens
+        else
+          break
+        end
       end
 
       # Handle alias reference
@@ -957,18 +958,19 @@ module JustYAML
       anchor : String? = nil
       tag : String? = nil
 
-      # Handle anchor
-      if check(TokenType::Anchor)
-        anchor = @current_token.value
-        advance
-        skip_whitespace_tokens
-      end
-
-      # Handle tag
-      if check(TokenType::Tag)
-        tag = @current_token.value
-        advance
-        skip_whitespace_tokens
+      # Handle anchor and tag in any order
+      loop do
+        if check(TokenType::Anchor) && anchor.nil?
+          anchor = @current_token.value
+          advance
+          skip_whitespace_tokens
+        elsif check(TokenType::Tag) && tag.nil?
+          tag = @current_token.value
+          advance
+          skip_whitespace_tokens
+        else
+          break
+        end
       end
 
       # Handle alias reference
