@@ -388,11 +388,24 @@ module JustYAML
 
       # Check if we're at column 1 (start of line) and might be ---
       if @column == 1 && peek_next_chars_are?('-', '-')
-        # This is ---
+        # Consume the three dashes
         advance # first -
         advance # second -
         advance # third -
-        Token.new(TokenType::DocumentStart, "---", loc)
+
+        # --- is only a document marker if followed by whitespace, newline, or EOF
+        if at_end? || current_char == ' ' || current_char == '\t' || current_char == '\n'
+          Token.new(TokenType::DocumentStart, "---", loc)
+        else
+          # Not a document start - it's a scalar starting with ---
+          value = String.build do |str|
+            str << "---"
+            while !at_end? && !scalar_terminator?(current_char)
+              str << advance
+            end
+          end
+          Token.new(TokenType::Scalar, value.strip, loc)
+        end
       else
         # Single dash - could be sequence entry or part of a scalar
         advance # consume the first -
