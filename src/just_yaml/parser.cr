@@ -1656,25 +1656,16 @@ module JustYAML
           # Calculate extra indentation (for more-indented lines)
           extra_indent = line_col > content_indent ? line_col - content_indent : 0
 
-          # Calculate where the content ends (for trailing whitespace detection)
-          content_end_col = line_col + line_value.size
+          line_content = " " * extra_indent + line_value
+          lines << {content: line_content, indent: line_col, is_empty: false}
           advance
 
-          # Consume the newline after this line and check for trailing whitespace
-          trailing_ws = ""
+          # Consume the newline after this line
           if check(TokenType::Newline)
-            newline_col = @current_token.location.column
-            # Trailing whitespace = characters between content end and newline
-            if newline_col > content_end_col
-              trailing_ws = " " * (newline_col - content_end_col)
-            end
             advance
           else
             break
           end
-
-          line_content = " " * extra_indent + line_value + trailing_ws
-          lines << {content: line_content, indent: line_col, is_empty: false}
         else
           break
         end
@@ -1807,7 +1798,14 @@ module JustYAML
                 AST::ScalarStyle::Plain
               end
 
-      node = AST::ScalarNode.new(token.value, style)
+      # For plain scalars, strip trailing whitespace (it's preserved for block scalar content)
+      value = if style == AST::ScalarStyle::Plain
+                token.value.rstrip
+              else
+                token.value
+              end
+
+      node = AST::ScalarNode.new(value, style)
       node.start_location = token.location
       node.end_location = token.location
       node

@@ -227,6 +227,7 @@ module JustYAML
       loc = current_location
       value = String.build do |str|
         trailing_ws = String::Builder.new
+        stopped_for_comment = false
 
         while !at_end? && !scalar_terminator_with_colon_check?(current_char)
           char = current_char
@@ -242,6 +243,7 @@ module JustYAML
               str << advance
             else
               # Comment starts here - don't include trailing whitespace
+              stopped_for_comment = true
               break
             end
           elsif char == '\n' && @flow_level > 0
@@ -271,9 +273,12 @@ module JustYAML
             str << advance
           end
         end
+        # Include trailing whitespace (before newline terminator)
+        # unless we stopped because of a comment
+        unless stopped_for_comment
+          str << trailing_ws.to_s
+        end
       end
-      # Note: trailing whitespace before terminators is already excluded by the loop
-      # Leading whitespace (tabs, etc.) is content and should be preserved
       Token.new(TokenType::Scalar, value, loc)
     end
 
