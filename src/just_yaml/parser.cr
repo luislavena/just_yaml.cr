@@ -935,8 +935,16 @@ module JustYAML
 
       while !check(TokenType::StreamEnd) && !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd)
         if check(TokenType::Newline)
-          # Empty line
-          lines << {content: "", indent: 0, is_empty: true}
+          # Empty/whitespace-only line
+          # The column tells us how much whitespace was on the line
+          ws_col = @current_token.location.column
+          if content_indent > 0 && ws_col > content_indent
+            # Line has extra whitespace beyond content indent - preserve it
+            extra_ws = " " * (ws_col - content_indent)
+            lines << {content: extra_ws, indent: ws_col, is_empty: false}
+          else
+            lines << {content: "", indent: 0, is_empty: true}
+          end
           advance
         elsif check(TokenType::Scalar) || check(TokenType::Comment)
           # In block scalars, comments are literal content (# is not special)
