@@ -743,8 +743,41 @@ module JustYAML
         next_col = @current_token.location.column
         break if next_col < key_indent
 
-        # Continue if another explicit key follows
-        unless check(TokenType::KeyIndicator)
+        # Continue if another key follows (explicit or implicit)
+        if check(TokenType::KeyIndicator)
+          # Another explicit key - continue looping
+          next
+        elsif check(TokenType::Scalar) && next_col == key_indent
+          # Implicit key at same indentation - check if followed by :
+          saved_token = @current_token
+          implicit_key = parse_scalar
+          skip_whitespace_tokens
+
+          if check(TokenType::ValueIndicator)
+            advance
+            skip_whitespace_tokens
+
+            implicit_value : AST::Node? = nil
+            unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+                   check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
+                   check(TokenType::DocumentEnd) || check(TokenType::Scalar)
+              implicit_value = parse_mapping_value(key_indent)
+            end
+
+            mapping.entries << AST::MappingEntry.new(key: implicit_key, value: implicit_value)
+            skip_comments_and_newlines
+
+            # Check if we should continue after implicit entry
+            break if check(TokenType::StreamEnd) ||
+                     check(TokenType::DocumentStart) ||
+                     check(TokenType::DocumentEnd)
+            # Continue to check for more entries
+            next
+          else
+            # Not a mapping entry, stop
+            break
+          end
+        else
           break
         end
       end
