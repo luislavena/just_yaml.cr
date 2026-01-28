@@ -23,6 +23,21 @@ module JustYAML
         return stream_end_token
       end
 
+      # Tab at start of indentation (column 1) is invalid for block indicators
+      # But tabs before flow indicators ({, [) are allowed
+      if @column == 1 && current_char == '\t' && @flow_level == 0
+        # Skip the tab(s) and check what follows
+        tab_loc = current_location
+        while current_char == '\t'
+          advance
+        end
+        # If followed by a flow indicator, the tabs were just whitespace (allowed)
+        # Otherwise, tabs were used as block indentation (error)
+        unless current_char == '[' || current_char == '{' || current_char == '\n' || at_end?
+          raise LexerError.new("Tab character cannot be used for indentation", tab_loc)
+        end
+      end
+
       case current_char
       when '\n'
         scan_newline
@@ -94,8 +109,16 @@ module JustYAML
     end
 
     private def skip_whitespace : Nil
-      while current_char == ' ' || current_char == '\t'
-        advance
+      # In flow context, tabs are allowed as whitespace
+      # In block context, only spaces are valid indentation
+      if @flow_level > 0
+        while current_char == ' ' || current_char == '\t'
+          advance
+        end
+      else
+        while current_char == ' '
+          advance
+        end
       end
     end
 
@@ -183,7 +206,9 @@ module JustYAML
           end
         end
       end
-      Token.new(TokenType::Scalar, value.strip, loc)
+      # Note: trailing whitespace before terminators is already excluded by the loop
+      # Leading whitespace (tabs, etc.) is content and should be preserved
+      Token.new(TokenType::Scalar, value, loc)
     end
 
     # Check if character terminates a scalar, with special colon handling
