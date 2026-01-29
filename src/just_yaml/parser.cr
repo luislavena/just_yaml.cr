@@ -60,6 +60,25 @@ module JustYAML
       # Parse document content (if any)
       unless check(TokenType::StreamEnd) || check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
         doc.root = parse_node(0)
+
+        # After parsing a node, check for unexpected trailing content on the same line
+        # This catches cases like "[ a, b, c ] ]" where extra content follows a flow collection
+        if root = doc.root
+          root_end_line = root.end_location.line
+          # Skip any comments on the same line (valid)
+          while check(TokenType::Comment) && @current_token.location.line == root_end_line
+            advance
+          end
+          # If there's non-comment, non-newline content on the same line, it's an error
+          if !check(TokenType::Newline) && !check(TokenType::StreamEnd) &&
+             !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd) &&
+             @current_token.location.line == root_end_line
+            raise ParseError.new(
+              "Unexpected content after value",
+              @current_token.location
+            )
+          end
+        end
       end
 
       skip_comments_and_newlines
@@ -923,6 +942,125 @@ module JustYAML
       mapping
     end
 
+    # Parse a mapping that starts with a tagged null key
+    # This handles cases like: !!null : value followed by regular entries
+    private def parse_mapping_with_tagged_null_key(min_indent : Int32, tag : String?, anchor : String?) : AST::MappingNode
+      mapping = AST::MappingNode.new
+      mapping.start_location = @current_token.location
+      mapping.style = AST::CollectionStyle::Block
+
+      # Use the passed min_indent as key indent (tag position), not the ValueIndicator position
+      key_indent = min_indent
+
+      # First entry: tagged null key
+      null_key = AST::ScalarNode.new("")
+      null_key.start_location = @current_token.location
+      null_key.end_location = @current_token.location
+      null_key.tag = tag
+      if anchor
+        null_key.anchor = anchor
+        @anchors[anchor] = null_key
+      end
+
+      expect(TokenType::ValueIndicator)
+      skip_whitespace_tokens
+
+      value = parse_mapping_value(key_indent)
+      mapping.entries << AST::MappingEntry.new(key: null_key, value: value)
+
+      skip_comments_and_newlines
+
+      # Continue with subsequent entries (can be null key or scalar key)
+      while !check(TokenType::StreamEnd) &&
+            !check(TokenType::DocumentStart) &&
+            !check(TokenType::DocumentEnd)
+        next_col = @current_token.location.column
+        break if next_col < key_indent
+
+        if check(TokenType::ValueIndicator) && next_col == key_indent
+          # Another null key entry
+          key = AST::ScalarNode.new("")
+          key.start_location = @current_token.location
+          key.end_location = @current_token.location
+
+          advance
+          skip_whitespace_tokens
+
+          null_key_value = parse_mapping_value(key_indent)
+          mapping.entries << AST::MappingEntry.new(key: key, value: null_key_value)
+          skip_comments_and_newlines
+        elsif check(TokenType::Scalar) && next_col == key_indent
+          # Regular scalar key entry
+          key = parse_scalar
+          skip_whitespace_tokens
+
+          unless check(TokenType::ValueIndicator)
+            break
+          end
+
+          advance
+          skip_whitespace_tokens
+
+          entry_value : AST::Node? = nil
+          unless check(TokenType::Newline) || check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
+            entry_value = parse_mapping_value(key_indent)
+          end
+
+          mapping.entries << AST::MappingEntry.new(key: key, value: entry_value)
+          skip_comments_and_newlines
+        elsif check(TokenType::Tag) && next_col == key_indent
+          # Tagged key entry
+          entry_tag = @current_token.value
+          advance
+          skip_whitespace_tokens
+
+          if check(TokenType::ValueIndicator)
+            # Tagged null key
+            key = AST::ScalarNode.new("")
+            key.start_location = @current_token.location
+            key.end_location = @current_token.location
+            key.tag = entry_tag
+
+            advance
+            skip_whitespace_tokens
+
+            tagged_null_key_value = parse_mapping_value(key_indent)
+            mapping.entries << AST::MappingEntry.new(key: key, value: tagged_null_key_value)
+            skip_comments_and_newlines
+          elsif check(TokenType::Scalar)
+            # Tagged scalar key
+            key = parse_scalar
+            key.tag = entry_tag
+            skip_whitespace_tokens
+
+            unless check(TokenType::ValueIndicator)
+              break
+            end
+
+            advance
+            skip_whitespace_tokens
+
+            tagged_scalar_value : AST::Node? = nil
+            unless check(TokenType::Newline) || check(TokenType::StreamEnd) ||
+                   check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
+              tagged_scalar_value = parse_mapping_value(key_indent)
+            end
+
+            mapping.entries << AST::MappingEntry.new(key: key, value: tagged_scalar_value)
+            skip_comments_and_newlines
+          else
+            break
+          end
+        else
+          break
+        end
+      end
+
+      mapping.end_location = @current_token.location
+      mapping
+    end
+
     private def parse_block_mapping_with_explicit_key(min_indent : Int32) : AST::MappingNode
       mapping = AST::MappingNode.new
       mapping.start_location = @current_token.location
@@ -1043,6 +1181,29 @@ module JustYAML
           else
             break
           end
+        elsif check(TokenType::ValueIndicator) && next_col == key_indent
+          # Implicit null key at same indentation (: value)
+          null_key = AST::ScalarNode.new("")
+          null_key.start_location = @current_token.location
+          null_key.end_location = @current_token.location
+
+          advance # consume :
+          skip_whitespace_tokens
+
+          null_value : AST::Node? = nil
+          unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+                 check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
+                 check(TokenType::DocumentEnd)
+            null_value = parse_mapping_value(key_indent)
+          end
+
+          mapping.entries << AST::MappingEntry.new(key: null_key, value: null_value)
+          skip_comments_and_newlines
+
+          break if check(TokenType::StreamEnd) ||
+                   check(TokenType::DocumentStart) ||
+                   check(TokenType::DocumentEnd)
+          next
         else
           break
         end
@@ -1551,8 +1712,15 @@ module JustYAML
 
     private def parse_sequence_item(entry_indent : Int32) : AST::Node
       # Check for anchor/tag on item
+      tag_col = @current_token.location.column
       anchor, tag, alias_node = parse_value_properties
       return alias_node if alias_node
+
+      # Special case: if we have tag/anchor and see ValueIndicator, the tag/anchor
+      # belongs to the null key of a mapping, not the whole mapping
+      if (tag || anchor) && check(TokenType::ValueIndicator)
+        return parse_mapping_with_tagged_null_key(tag_col, tag, anchor)
+      end
 
       node = parse_sequence_item_content(entry_indent)
 
@@ -1589,6 +1757,57 @@ module JustYAML
         parse_block_sequence(entry_indent)
       when TokenType::BlockScalarHeader
         parse_block_scalar(entry_indent)
+      when TokenType::Tag, TokenType::Anchor
+        # Tagged/anchored content on same line as sequence entry
+        tag_col = @current_token.location.column
+        anchor, tag, alias_node = parse_value_properties
+        return alias_node if alias_node
+
+        # After tag/anchor, parse the actual content
+        case @current_token.type
+        when TokenType::Scalar
+          scalar = parse_scalar
+          skip_whitespace_tokens
+          if check(TokenType::ValueIndicator)
+            # Tagged/anchored key - this is a mapping
+            mapping = parse_block_mapping(scalar, tag_col)
+            # Apply tag/anchor to the scalar key, not the mapping
+            scalar.tag = tag if tag && !scalar.tag
+            if anchor && !scalar.anchor
+              scalar.anchor = anchor
+              @anchors[anchor] = scalar
+            end
+            mapping
+          else
+            # Just a tagged/anchored scalar
+            scalar.tag = tag if tag
+            if anchor
+              scalar.anchor = anchor
+              @anchors[anchor] = scalar
+            end
+            scalar
+          end
+        when TokenType::ValueIndicator
+          # Tagged/anchored null key - this is a mapping
+          parse_mapping_with_tagged_null_key(tag_col, tag, anchor)
+        when TokenType::Newline, TokenType::Comment, TokenType::StreamEnd
+          # Tagged/anchored empty scalar
+          empty = AST::ScalarNode.new("")
+          empty.tag = tag if tag
+          if anchor
+            empty.anchor = anchor
+            @anchors[anchor] = empty
+          end
+          empty
+        else
+          empty = AST::ScalarNode.new("")
+          empty.tag = tag if tag
+          if anchor
+            empty.anchor = anchor
+            @anchors[anchor] = empty
+          end
+          empty
+        end
       when TokenType::Newline, TokenType::Comment
         # Check for block content on next line
         skip_comments_and_newlines
@@ -1614,6 +1833,42 @@ module JustYAML
             else
               scalar
             end
+          when TokenType::Tag, TokenType::Anchor
+            # Tagged/anchored nested content
+            anchor, tag, alias_node = parse_value_properties
+            return alias_node if alias_node
+
+            # After tag/anchor, parse the actual content
+            node = case @current_token.type
+                   when TokenType::Scalar
+                     scalar = parse_scalar
+                     skip_whitespace_tokens
+                     if check(TokenType::ValueIndicator)
+                       parse_block_mapping(scalar, next_col)
+                     else
+                       scalar
+                     end
+                   when TokenType::SequenceEntry
+                     parse_block_sequence(next_col)
+                   when TokenType::ValueIndicator
+                     # Tagged null key mapping - parse as mapping starting with tagged null key
+                     parse_mapping_with_tagged_null_key(next_col, tag, anchor)
+                   else
+                     AST::ScalarNode.new("")
+                   end
+
+            # Only apply anchor/tag if not already handled (for ValueIndicator case)
+            unless @current_token.type == TokenType::ValueIndicator || node.tag
+              if anchor
+                node.anchor = anchor
+                @anchors[anchor] = node
+              end
+              node.tag = tag if tag
+            end
+            node
+          when TokenType::ValueIndicator
+            # Null key mapping
+            parse_block_mapping_with_null_key(next_col)
           else
             AST::ScalarNode.new("")
           end
