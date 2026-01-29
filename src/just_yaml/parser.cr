@@ -197,9 +197,27 @@ module JustYAML
       when TokenType::SequenceStart
         node = parse_flow_sequence
         apply_node_properties(node, anchor, tag)
+        skip_whitespace_tokens
+        # Check if this flow sequence is actually a mapping key
+        # Implicit keys must be single-line, so verify start and end are on same line
+        if check(TokenType::ValueIndicator) &&
+           node.start_location.line == node.end_location.line &&
+           @current_token.location.line == node.end_location.line
+          node = parse_block_mapping_with_complex_key(node, entry_start_col)
+        end
+        node
       when TokenType::MappingStart
         node = parse_flow_mapping
         apply_node_properties(node, anchor, tag)
+        skip_whitespace_tokens
+        # Check if this flow mapping is actually a mapping key
+        # Implicit keys must be single-line, so verify start and end are on same line
+        if check(TokenType::ValueIndicator) &&
+           node.start_location.line == node.end_location.line &&
+           @current_token.location.line == node.end_location.line
+          node = parse_block_mapping_with_complex_key(node, entry_start_col)
+        end
+        node
       when TokenType::BlockScalarHeader
         node = parse_block_scalar(min_indent)
         apply_node_properties(node, anchor, tag)
