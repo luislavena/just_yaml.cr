@@ -418,10 +418,15 @@ module JustYAML
     end
 
     private def parse_mapping_or_scalar_with_properties(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?) : AST::Node
+      key_start_line = @current_token.location.line
       first_scalar = parse_scalar
       skip_whitespace_tokens
 
       if check(TokenType::ValueIndicator)
+        # Implicit keys cannot span multiple lines
+        if @current_token.location.line != key_start_line
+          raise ParseError.new("Implicit key cannot span multiple lines", first_scalar.start_location)
+        end
         # This is a mapping - apply anchor/tag to the KEY, not the mapping
         if anchor
           first_scalar.anchor = anchor
@@ -782,6 +787,7 @@ module JustYAML
 
           # Look ahead to verify this is a mapping entry (has ValueIndicator)
           saved_token = @current_token
+          key_start_line = @current_token.location.line
           key = parse_scalar
           skip_whitespace_tokens
 
@@ -791,6 +797,11 @@ module JustYAML
               "Unexpected scalar '#{saved_token.value}' without mapping value",
               saved_token.location
             )
+          end
+
+          # Implicit keys cannot span multiple lines
+          if @current_token.location.line != key_start_line
+            raise ParseError.new("Implicit key cannot span multiple lines", saved_token.location)
           end
 
           # Apply anchor/tag to the key
@@ -1211,10 +1222,15 @@ module JustYAML
         elsif check(TokenType::Scalar) && next_col == key_indent
           # Implicit key at same indentation - check if followed by :
           saved_token = @current_token
+          key_start_line = @current_token.location.line
           implicit_key = parse_scalar
           skip_whitespace_tokens
 
           if check(TokenType::ValueIndicator)
+            # Implicit keys cannot span multiple lines
+            if @current_token.location.line != key_start_line
+              raise ParseError.new("Implicit key cannot span multiple lines", saved_token.location)
+            end
             advance
             skip_whitespace_tokens
 
