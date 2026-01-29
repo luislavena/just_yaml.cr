@@ -823,11 +823,33 @@ module JustYAML
             skip_whitespace_tokens
 
             # Parse the explicit key
-            explicit_key : AST::Node = if check(TokenType::Newline) || check(TokenType::ValueIndicator)
+            explicit_key : AST::Node = if check(TokenType::ValueIndicator)
+              # Immediate null key (? :)
               null_key = AST::ScalarNode.new("")
               null_key.start_location = @current_token.location
               null_key.end_location = @current_token.location
               null_key
+            elsif check(TokenType::Newline) || check(TokenType::Comment)
+              # Key content might be on next line or be null
+              skip_comments_and_newlines
+
+              if check(TokenType::ValueIndicator) || check(TokenType::StreamEnd) ||
+                 check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
+                # Null key
+                null_key = AST::ScalarNode.new("")
+                null_key.start_location = @current_token.location
+                null_key.end_location = @current_token.location
+                null_key
+              elsif @current_token.location.column >= key_indent
+                # Content on next line - parse as explicit key
+                parse_explicit_key_value(key_indent)
+              else
+                # Dedented - null key
+                null_key = AST::ScalarNode.new("")
+                null_key.start_location = @current_token.location
+                null_key.end_location = @current_token.location
+                null_key
+              end
             else
               parse_explicit_key_value(key_indent)
             end
@@ -840,7 +862,8 @@ module JustYAML
               advance
               skip_whitespace_tokens
 
-              unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+              # parse_mapping_value handles both inline values and block values on next line
+              unless check(TokenType::KeyIndicator) ||
                      check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
                      check(TokenType::DocumentEnd)
                 explicit_value = parse_mapping_value(key_indent)
