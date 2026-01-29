@@ -1,6 +1,6 @@
 module JustYAML
   module AST
-    record Comment, text : String, location : Location
+    record Comment, text : String, location : Location, preceding_blank_lines : Int32 = 0
 
     enum ScalarStyle
       Plain

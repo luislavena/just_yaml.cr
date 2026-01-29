@@ -191,7 +191,8 @@ module JustYAML
           serialize_node(item, io, indent + @indent_size, context: :sequence_item)
         end
 
-        io << "\n" unless index == node.items.size - 1 && context != :mapping_value
+        # Add newline between items, but not after the last one
+        io << "\n" unless index == node.items.size - 1
       end
     end
 
@@ -228,7 +229,8 @@ module JustYAML
 
         io << " " * indent if indent > 0 || context == :mapping_value
         serialize_mapping_entry(entry, io, indent)
-        io << "\n" unless index == node.entries.size - 1 && context != :mapping_value
+        # Add newline between entries, but not after the last one
+        io << "\n" unless index == node.entries.size - 1
       end
     end
 
@@ -287,6 +289,8 @@ module JustYAML
 
     private def serialize_comments(comments : Array(AST::Comment), io : IO, indent : Int32) : Nil
       comments.each do |comment|
+        # Output preceding blank lines
+        comment.preceding_blank_lines.times { io << "\n" }
         io << " " * indent
         io << "#" << comment.text << "\n"
       end

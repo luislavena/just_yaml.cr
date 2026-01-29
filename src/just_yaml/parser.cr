@@ -8,6 +8,10 @@ module JustYAML
     @flow_block_indent : Int32 = -1
     # Track defined tag handles for the current document (reset per document)
     @tag_handles : Hash(String, String) = {} of String => String
+    # Pending comments to attach to the next node
+    @pending_comments : Array(AST::Comment) = [] of AST::Comment
+    # Pending blank lines count (for comments after multiline scalars)
+    @pending_blank_lines : Int32 = 0
 
     def initialize(input : String)
       @lexer = Lexer.new(input)
@@ -145,6 +149,10 @@ module JustYAML
     private def parse_node(min_indent : Int32) : AST::Node
       skip_comments_and_newlines
 
+      # Capture pending comments to attach to the first meaningful node
+      leading_comments = @pending_comments.dup
+      @pending_comments.clear
+
       # Track where node properties start (for mapping indent detection)
       props_line = @current_token.location.line
       entry_start_col = @current_token.location.column
@@ -152,7 +160,10 @@ module JustYAML
       # Parse anchor, tag, or alias that precedes the actual node
       anchor, tag, alias_node = parse_node_properties
 
-      return alias_node if alias_node
+      if alias_node
+        attach_comments_to_node(alias_node, leading_comments)
+        return alias_node
+      end
 
       # Skip newlines after anchor/tag (content may be on next line)
       skip_comments_and_newlines
@@ -175,9 +186,15 @@ module JustYAML
       end
 
       # Pass anchor/tag info so mapping can apply it to the key if appropriate
-      node = parse_node_content_with_properties(min_indent, entry_start_col, anchor, tag)
+      # Also pass the leading comments to attach to the first key if this becomes a mapping
+      node = parse_node_content_with_properties_and_comments(min_indent, entry_start_col, anchor, tag, leading_comments)
 
       node
+    end
+
+    # Attach leading comments to a node
+    private def attach_comments_to_node(node : AST::Node, comments : Array(AST::Comment)) : Nil
+      node.leading_comments.concat(comments) unless comments.empty?
     end
 
     private def parse_node_properties : {String?, String?, AST::Node?}
@@ -236,20 +253,24 @@ module JustYAML
     end
 
     private def parse_node_content(min_indent : Int32) : AST::Node
-      parse_node_content_with_properties(min_indent, @current_token.location.column, nil, nil)
+      parse_node_content_with_properties_and_comments(min_indent, @current_token.location.column, nil, nil, [] of AST::Comment)
     end
 
     private def parse_node_content_with_entry_start(min_indent : Int32, entry_start_col : Int32) : AST::Node
-      parse_node_content_with_properties(min_indent, entry_start_col, nil, nil)
+      parse_node_content_with_properties_and_comments(min_indent, entry_start_col, nil, nil, [] of AST::Comment)
     end
 
     private def parse_node_content_with_properties(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?) : AST::Node
+      parse_node_content_with_properties_and_comments(min_indent, entry_start_col, anchor, tag, [] of AST::Comment)
+    end
+
+    private def parse_node_content_with_properties_and_comments(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?, leading_comments : Array(AST::Comment)) : AST::Node
       case @current_token.type
       when TokenType::SequenceEntry
-        node = parse_block_sequence(min_indent)
+        node = parse_block_sequence_with_comments(min_indent, leading_comments)
         apply_node_properties(node, anchor, tag)
       when TokenType::Scalar
-        parse_mapping_or_scalar_with_properties(min_indent, entry_start_col, anchor, tag)
+        parse_mapping_or_scalar_with_properties_and_comments(min_indent, entry_start_col, anchor, tag, leading_comments)
       when TokenType::SequenceStart
         # Top-level flow collections don't have block indent restrictions
         node = parse_flow_sequence
@@ -463,14 +484,18 @@ module JustYAML
     end
 
     private def parse_mapping_or_scalar(min_indent : Int32) : AST::Node
-      parse_mapping_or_scalar_with_properties(min_indent, @current_token.location.column, nil, nil)
+      parse_mapping_or_scalar_with_properties_and_comments(min_indent, @current_token.location.column, nil, nil, [] of AST::Comment)
     end
 
     private def parse_mapping_or_scalar_with_entry_start(min_indent : Int32, entry_start_col : Int32) : AST::Node
-      parse_mapping_or_scalar_with_properties(min_indent, entry_start_col, nil, nil)
+      parse_mapping_or_scalar_with_properties_and_comments(min_indent, entry_start_col, nil, nil, [] of AST::Comment)
     end
 
     private def parse_mapping_or_scalar_with_properties(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?) : AST::Node
+      parse_mapping_or_scalar_with_properties_and_comments(min_indent, entry_start_col, anchor, tag, [] of AST::Comment)
+    end
+
+    private def parse_mapping_or_scalar_with_properties_and_comments(min_indent : Int32, entry_start_col : Int32, anchor : String?, tag : String?, leading_comments : Array(AST::Comment)) : AST::Node
       key_start_line = @current_token.location.line
       first_scalar = parse_scalar
       skip_whitespace_tokens
@@ -486,11 +511,15 @@ module JustYAML
           @anchors[anchor] = first_scalar
         end
         first_scalar.tag = tag if tag
+        # Attach leading comments to the first key
+        attach_comments_to_node(first_scalar, leading_comments)
         parse_block_mapping_with_entry_start(first_scalar, min_indent, entry_start_col)
       else
         # Just a scalar - apply anchor/tag to it
         node = parse_multiline_plain_scalar(first_scalar)
         apply_node_properties(node, anchor, tag)
+        attach_comments_to_node(node, leading_comments)
+        node
       end
     end
 
@@ -567,15 +596,24 @@ module JustYAML
         break unless check(TokenType::Newline) || check(TokenType::Comment)
 
         # Track empty lines (they become newlines in folded text)
+        # Also track blank lines for any comment that follows
+        # A blank line is when we see consecutive newlines
+        newline_count = 0
         while check(TokenType::Newline)
           advance
+          newline_count += 1
           if check(TokenType::Newline) || check(TokenType::StreamEnd)
             empty_line_count += 1
           end
         end
 
         # Comments end the plain scalar - no continuation after a comment
+        # Store the blank line count for when skip_comments_and_newlines is called
+        # blank lines = newline_count - 1 (first newline ends the previous line)
         if check(TokenType::Comment)
+          # Don't collect or advance - let skip_comments_and_newlines handle it
+          # But we need to communicate the blank line count somehow
+          @pending_blank_lines = (newline_count > 1) ? newline_count - 1 : 0
           break
         end
 
@@ -818,10 +856,14 @@ module JustYAML
         expect(TokenType::ValueIndicator)
         skip_whitespace_tokens
 
-        value = parse_mapping_value(key_indent, key_line)
-        mapping.entries << AST::MappingEntry.new(key: key, value: value)
+        value, key_comments = parse_mapping_value_with_key_comments(key_indent, key_line)
+        mapping.entries << AST::MappingEntry.new(key: key, value: value, key_comments: key_comments)
 
         skip_comments_and_newlines
+
+        # Capture pending comments for next key
+        next_key_comments = @pending_comments.dup
+        @pending_comments.clear
 
         # Check if we're done with this mapping
         break if check(TokenType::StreamEnd) ||
@@ -880,6 +922,9 @@ module JustYAML
             @anchors[next_key_anchor] = key
           end
           key.tag = next_key_tag if next_key_tag
+
+          # Attach leading comments to the key
+          attach_comments_to_node(key, next_key_comments)
         when TokenType::Alias
           # Anchor and alias are mutually exclusive
           if next_key_anchor
@@ -1510,9 +1555,24 @@ module JustYAML
     end
 
     private def parse_mapping_value(key_indent : Int32, parent_key_line : Int32? = nil) : AST::Node?
+      value, _ = parse_mapping_value_with_key_comments(key_indent, parent_key_line)
+      value
+    end
+
+    # Returns tuple of (value, key_comments)
+    # key_comments are comments that appear after the colon but before the value
+    private def parse_mapping_value_with_key_comments(key_indent : Int32, parent_key_line : Int32? = nil) : {AST::Node?, Array(AST::Comment)}
+      key_comments = [] of AST::Comment
+
+      # Check for comment immediately after colon (same line)
+      if check(TokenType::Comment) && parent_key_line && @current_token.location.line == parent_key_line
+        key_comments << AST::Comment.new(@current_token.value, @current_token.location)
+        advance
+      end
+
       # Check for anchor/tag/alias on value
       anchor, tag, alias_node = parse_value_properties
-      return alias_node if alias_node
+      return {alias_node, key_comments} if alias_node
 
       node = parse_mapping_value_content(key_indent, anchor, tag, parent_key_line)
 
@@ -1532,7 +1592,7 @@ module JustYAML
         node.tag = tag
       end
 
-      node
+      {node, key_comments}
     end
 
     private def parse_value_properties : {String?, String?, AST::Node?}
@@ -1592,7 +1652,10 @@ module JustYAML
           parse_block_mapping(scalar, key_indent)
         else
           # Check for multiline plain scalar
-          parse_multiline_plain_scalar_in_mapping(scalar, key_indent)
+          node = parse_multiline_plain_scalar_in_mapping(scalar, key_indent)
+          # Check for trailing comment on the same line
+          attach_trailing_comment(node)
+          node
         end
       when TokenType::SequenceStart
         saved_indent = @flow_block_indent
@@ -1620,6 +1683,10 @@ module JustYAML
         # Value on next line (block collection)
         skip_comments_and_newlines
 
+        # Capture pending comments for nested value
+        nested_comments = @pending_comments.dup
+        @pending_comments.clear
+
         return nil if check(TokenType::StreamEnd) ||
                       check(TokenType::DocumentStart) ||
                       check(TokenType::DocumentEnd)
@@ -1641,7 +1708,7 @@ module JustYAML
         end
 
         # Nested block content
-        parse_nested_value(next_col, key_indent, anchor, tag)
+        parse_nested_value_with_comments(next_col, key_indent, anchor, tag, nested_comments)
       when TokenType::StreamEnd
         nil
       else
@@ -1650,9 +1717,13 @@ module JustYAML
     end
 
     private def parse_nested_value(next_col : Int32, key_indent : Int32, anchor : String?, tag : String?) : AST::Node?
+      parse_nested_value_with_comments(next_col, key_indent, anchor, tag, [] of AST::Comment)
+    end
+
+    private def parse_nested_value_with_comments(next_col : Int32, key_indent : Int32, anchor : String?, tag : String?, leading_comments : Array(AST::Comment)) : AST::Node?
       case @current_token.type
       when TokenType::SequenceEntry
-        parse_block_sequence(next_col)
+        parse_block_sequence_with_comments(next_col, leading_comments)
       when TokenType::KeyIndicator
         # Explicit key mapping as nested value
         parse_block_mapping_with_explicit_key(next_col)
@@ -1893,11 +1964,16 @@ module JustYAML
     end
 
     private def parse_block_sequence(min_indent : Int32) : AST::SequenceNode
+      parse_block_sequence_with_comments(min_indent, [] of AST::Comment)
+    end
+
+    private def parse_block_sequence_with_comments(min_indent : Int32, first_item_comments : Array(AST::Comment)) : AST::SequenceNode
       sequence = AST::SequenceNode.new
       sequence.start_location = @current_token.location
       sequence.style = AST::CollectionStyle::Block
 
       entry_indent = @current_token.location.column
+      is_first_item = true
 
       while check(TokenType::SequenceEntry)
         # Verify indentation - must match exactly
@@ -1913,6 +1989,16 @@ module JustYAML
 
         # Parse item value
         item = parse_sequence_item(entry_indent)
+
+        # Attach leading comments to item
+        if is_first_item
+          attach_comments_to_node(item, first_item_comments)
+          is_first_item = false
+        else
+          # Subsequent items get comments collected during skip_comments_and_newlines
+          attach_leading_comments(item)
+        end
+
         sequence.items << item
 
         skip_comments_and_newlines
@@ -2813,7 +2899,52 @@ module JustYAML
     end
 
     private def skip_comments_and_newlines : Nil
+      # Check if there are pending blank lines from multiline scalar processing
+      blank_line_count = @pending_blank_lines
+      @pending_blank_lines = 0
+      last_was_newline = blank_line_count > 0 # If we have pending blank lines, previous was a newline
+
       while check(TokenType::Newline) || check(TokenType::Comment)
+        if check(TokenType::Comment)
+          collect_comment_with_blank_lines(blank_line_count)
+          blank_line_count = 0
+          last_was_newline = false
+        elsif check(TokenType::Newline)
+          if last_was_newline
+            # Consecutive newlines indicate blank lines
+            blank_line_count += 1
+          end
+          last_was_newline = true
+        end
+        advance
+      end
+    end
+
+    # Collect current comment token into pending comments with blank line count
+    private def collect_comment_with_blank_lines(blank_lines : Int32) : Nil
+      if check(TokenType::Comment)
+        comment = AST::Comment.new(@current_token.value, @current_token.location, blank_lines)
+        @pending_comments << comment
+      end
+    end
+
+    # Collect current comment token into pending comments (no blank lines)
+    private def collect_comment : Nil
+      collect_comment_with_blank_lines(0)
+    end
+
+    # Transfer pending comments to a node as leading comments
+    private def attach_leading_comments(node : AST::Node) : Nil
+      unless @pending_comments.empty?
+        node.leading_comments.concat(@pending_comments)
+        @pending_comments.clear
+      end
+    end
+
+    # Attach a trailing comment (same line) to a node
+    private def attach_trailing_comment(node : AST::Node) : Nil
+      if check(TokenType::Comment) && @current_token.location.line == node.end_location.line
+        node.trailing_comment = AST::Comment.new(@current_token.value, @current_token.location)
         advance
       end
     end
