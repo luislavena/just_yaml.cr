@@ -6,6 +6,8 @@ module JustYAML
     # Track the containing block indent for flow collection indentation validation
     # Flow content continuation lines must be more indented than this
     @flow_block_indent : Int32 = -1
+    # Track defined tag handles for the current document (reset per document)
+    @tag_handles : Hash(String, String) = {} of String => String
 
     def initialize(input : String)
       @lexer = Lexer.new(input)
@@ -41,6 +43,9 @@ module JustYAML
     private def parse_document(after_document_end : Bool = false) : AST::DocumentNode
       doc = AST::DocumentNode.new
       doc.start_location = @current_token.location
+
+      # Reset tag handles for this document (directives don't carry across documents)
+      @tag_handles.clear
 
       # Check for directives before document
       had_directives = skip_directives_with_validation(after_document_end)
@@ -187,6 +192,20 @@ module JustYAML
           skip_whitespace_tokens
         elsif check(TokenType::Tag) && tag.nil?
           tag = @current_token.value
+          tag_loc = @current_token.location
+
+          # Validate tag handle if it's a named handle (!name!suffix pattern)
+          # Named handles (not ! or !!) must be defined via %TAG directive
+          if tag.size > 2 && tag.starts_with?("!") && !tag.starts_with?("!!") && !tag.starts_with?("!<")
+            # Look for the closing ! of the handle
+            if end_idx = tag.index('!', 1)
+              handle = tag[0..end_idx]
+              unless @tag_handles.has_key?(handle)
+                raise ParseError.new("Unknown tag handle '#{handle}' - must be defined with %TAG directive", tag_loc)
+              end
+            end
+          end
+
           advance
           skip_whitespace_tokens
         else
@@ -2774,6 +2793,14 @@ module JustYAML
             # Allow optional comment after the version number
             unless directive_value =~ /\A%YAML\s+\d+\.\d+(\s+#.*)?\s*\z/
               raise ParseError.new("Invalid %YAML directive format", directive_loc)
+            end
+          elsif directive_value.starts_with?("%TAG")
+            # Parse %TAG directive: %TAG !handle! uri
+            # Handle can be !, !!, or !name!
+            if match = directive_value.match(/\A%TAG\s+(![^\s!]*!?)\s+(\S+)/)
+              handle = match[1]
+              uri = match[2]
+              @tag_handles[handle] = uri
             end
           end
 
