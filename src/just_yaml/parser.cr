@@ -1126,7 +1126,10 @@ module JustYAML
           advance
           skip_whitespace_tokens
 
-          unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+          # parse_mapping_value handles both inline values and block values on next line
+          # Only skip if the next entry starts immediately (KeyIndicator at same indent)
+          # or if we hit stream/document boundaries
+          unless check(TokenType::KeyIndicator) ||
                  check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
                  check(TokenType::DocumentEnd)
             value = parse_mapping_value(key_indent)
@@ -1276,6 +1279,9 @@ module JustYAML
                parse_flow_sequence
              when TokenType::MappingStart
                parse_flow_mapping
+             when TokenType::SequenceEntry
+               # Block sequence as explicit key value
+               parse_block_sequence(@current_token.location.column)
              when TokenType::BlockScalarHeader
                parse_block_scalar(key_indent)
              else
