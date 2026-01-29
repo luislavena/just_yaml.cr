@@ -98,6 +98,7 @@ module JustYAML
       skip_comments_and_newlines
 
       # Track where node properties start (for mapping indent detection)
+      props_line = @current_token.location.line
       entry_start_col = @current_token.location.column
 
       # Parse anchor, tag, or alias that precedes the actual node
@@ -107,6 +108,15 @@ module JustYAML
 
       # Skip newlines after anchor/tag (content may be on next line)
       skip_comments_and_newlines
+
+      # If content is on a different line than the properties, use the content's column
+      # This handles cases like:
+      #   --- !<tag>
+      #   key: value
+      # where the tag is at column 5 but the mapping should start at column 1
+      if (anchor || tag) && @current_token.location.line != props_line
+        entry_start_col = @current_token.location.column
+      end
 
       # Pass anchor/tag info so mapping can apply it to the key if appropriate
       node = parse_node_content_with_properties(min_indent, entry_start_col, anchor, tag)
@@ -755,6 +765,101 @@ module JustYAML
           unless check(TokenType::ValueIndicator)
             break
           end
+        when TokenType::KeyIndicator
+          # Explicit key at same level - parse and merge into this mapping
+          break if entry_start != key_indent
+
+          # Handle all consecutive explicit key entries in an inner loop
+          while check(TokenType::KeyIndicator) && @current_token.location.column == key_indent
+            advance
+            skip_whitespace_tokens
+
+            # Parse the explicit key
+            explicit_key : AST::Node = if check(TokenType::Newline) || check(TokenType::ValueIndicator)
+              null_key = AST::ScalarNode.new("")
+              null_key.start_location = @current_token.location
+              null_key.end_location = @current_token.location
+              null_key
+            else
+              parse_explicit_key_value(key_indent)
+            end
+
+            skip_comments_and_newlines
+
+            # Parse value (optional)
+            explicit_value : AST::Node? = nil
+            if check(TokenType::ValueIndicator)
+              advance
+              skip_whitespace_tokens
+
+              unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+                     check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
+                     check(TokenType::DocumentEnd)
+                explicit_value = parse_mapping_value(key_indent)
+              end
+            end
+
+            mapping.entries << AST::MappingEntry.new(key: explicit_key, value: explicit_value)
+
+            skip_comments_and_newlines
+
+            # Check if we're done
+            break if check(TokenType::StreamEnd) ||
+                     check(TokenType::DocumentStart) ||
+                     check(TokenType::DocumentEnd)
+
+            break if @current_token.location.column < key_indent
+          end
+
+          # After processing explicit keys, check what's next
+          break if check(TokenType::StreamEnd) ||
+                   check(TokenType::DocumentStart) ||
+                   check(TokenType::DocumentEnd)
+
+          break if @current_token.location.column < key_indent
+
+          # Check for anchor/tag on next entry
+          entry_start = @current_token.location.column
+          next_key_anchor = nil
+          next_key_tag = nil
+
+          if check(TokenType::Anchor)
+            next_key_anchor = @current_token.value
+            advance
+            skip_whitespace_tokens
+          end
+
+          if check(TokenType::Tag)
+            next_key_tag = @current_token.value
+            advance
+            skip_whitespace_tokens
+          end
+
+          # If next is an implicit key (Scalar), set it up and continue outer loop
+          if check(TokenType::Scalar) && entry_start == key_indent
+            saved_token = @current_token
+            key = parse_scalar
+            skip_whitespace_tokens
+
+            unless check(TokenType::ValueIndicator)
+              raise ParseError.new(
+                "Unexpected scalar '#{saved_token.value}' without mapping value",
+                saved_token.location
+              )
+            end
+
+            if next_key_anchor
+              key.anchor = next_key_anchor
+              @anchors[next_key_anchor] = key
+            end
+            key.tag = next_key_tag if next_key_tag
+
+            # Continue outer loop to process this implicit entry
+            next
+          end
+
+          # Otherwise we're done (or there's another KeyIndicator which the while loop should have handled)
+          break
         when TokenType::SequenceEntry
           # Block sequence at same level - not part of this mapping
           break
@@ -891,6 +996,42 @@ module JustYAML
             # Not a mapping entry, stop
             break
           end
+        elsif check(TokenType::Anchor) && next_col == key_indent
+          # Anchored implicit key at same indentation
+          anchor_name = @current_token.value
+          advance
+          skip_whitespace_tokens
+
+          if check(TokenType::Scalar)
+            anchored_key = parse_scalar
+            anchored_key.anchor = anchor_name
+            @anchors[anchor_name] = anchored_key
+            skip_whitespace_tokens
+
+            if check(TokenType::ValueIndicator)
+              advance
+              skip_whitespace_tokens
+
+              anchored_value : AST::Node? = nil
+              unless check(TokenType::Newline) || check(TokenType::KeyIndicator) ||
+                     check(TokenType::StreamEnd) || check(TokenType::DocumentStart) ||
+                     check(TokenType::DocumentEnd)
+                anchored_value = parse_mapping_value(key_indent)
+              end
+
+              mapping.entries << AST::MappingEntry.new(key: anchored_key, value: anchored_value)
+              skip_comments_and_newlines
+
+              break if check(TokenType::StreamEnd) ||
+                       check(TokenType::DocumentStart) ||
+                       check(TokenType::DocumentEnd)
+              next
+            else
+              break
+            end
+          else
+            break
+          end
         else
           break
         end
@@ -901,26 +1042,51 @@ module JustYAML
     end
 
     private def parse_explicit_key_value(key_indent : Int32) : AST::Node
-      case @current_token.type
-      when TokenType::Scalar
-        # Parse scalar and check for multiline continuation
-        scalar = parse_scalar
+      # Handle anchor/tag before the actual value
+      key_anchor : String? = nil
+      key_tag : String? = nil
+
+      if check(TokenType::Anchor)
+        key_anchor = @current_token.value
+        advance
         skip_whitespace_tokens
-        # Check for multiline continuation (more-indented lines or same-indent without :)
-        fold_multiline_plain_scalar(scalar, mode: MultilineScalarMode::Mapping, key_indent: key_indent)
-      when TokenType::SequenceStart
-        parse_flow_sequence
-      when TokenType::MappingStart
-        parse_flow_mapping
-      when TokenType::BlockScalarHeader
-        parse_block_scalar(key_indent)
-      else
-        # Default to empty scalar
-        null_key = AST::ScalarNode.new("")
-        null_key.start_location = @current_token.location
-        null_key.end_location = @current_token.location
-        null_key
       end
+
+      if check(TokenType::Tag)
+        key_tag = @current_token.value
+        advance
+        skip_whitespace_tokens
+      end
+
+      node = case @current_token.type
+             when TokenType::Scalar
+               # Parse scalar and check for multiline continuation
+               scalar = parse_scalar
+               skip_whitespace_tokens
+               # Check for multiline continuation (more-indented lines or same-indent without :)
+               fold_multiline_plain_scalar(scalar, mode: MultilineScalarMode::Mapping, key_indent: key_indent)
+             when TokenType::SequenceStart
+               parse_flow_sequence
+             when TokenType::MappingStart
+               parse_flow_mapping
+             when TokenType::BlockScalarHeader
+               parse_block_scalar(key_indent)
+             else
+               # Default to empty scalar
+               null_key = AST::ScalarNode.new("")
+               null_key.start_location = @current_token.location
+               null_key.end_location = @current_token.location
+               null_key
+             end
+
+      # Apply anchor and tag
+      if key_anchor
+        node.anchor = key_anchor
+        @anchors[key_anchor] = node
+      end
+      node.tag = key_tag if key_tag
+
+      node
     end
 
     # Parse a mapping where the first key is an already-resolved alias
@@ -1836,8 +2002,43 @@ module JustYAML
           extra_indent = line_col > content_indent ? line_col - content_indent : 0
 
           line_content = " " * extra_indent + line_value
-          lines << {content: line_content, indent: line_col, is_empty: false}
           advance
+
+          # Continue consuming tokens on the same line (e.g., scalars followed by comments)
+          # Block scalars treat comments as literal content
+          while !check(TokenType::Newline) && !check(TokenType::StreamEnd) &&
+                !check(TokenType::DocumentStart) && !check(TokenType::DocumentEnd)
+            # Preserve spacing between tokens on the same line
+            token_spacing = @current_token.location.column - (line_col + line_content.size - extra_indent)
+            if token_spacing > 0
+              line_content += " " * token_spacing
+            end
+
+            additional_value = case @current_token.type
+                               when TokenType::Comment
+                                 "#" + @current_token.value
+                               when TokenType::Anchor
+                                 "&" + @current_token.value
+                               when TokenType::Alias
+                                 "*" + @current_token.value
+                               when TokenType::Tag
+                                 @current_token.value
+                               when TokenType::SequenceEntry
+                                 "-"
+                               when TokenType::KeyIndicator
+                                 "?"
+                               when TokenType::ValueIndicator
+                                 ":"
+                               when TokenType::Scalar
+                                 @current_token.value
+                               else
+                                 break
+                               end
+            line_content += additional_value
+            advance
+          end
+
+          lines << {content: line_content, indent: line_col, is_empty: false}
 
           # Consume the newline after this line
           if check(TokenType::Newline)

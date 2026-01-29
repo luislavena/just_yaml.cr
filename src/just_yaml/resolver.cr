@@ -73,9 +73,12 @@ module JustYAML
       when "!!bool"
         value.downcase == "true"
       when "!!int"
-        value.to_i64
+        # Try to parse as int, but return string if it fails
+        # (could be a custom tag redefinition via %TAG directive)
+        value.to_i64? || value
       when "!!float"
-        value.to_f64
+        # Try to parse as float, but return string if it fails
+        value.to_f64? || value
       when "!!str"
         value
       else
