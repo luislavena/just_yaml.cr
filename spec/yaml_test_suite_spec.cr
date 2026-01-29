@@ -126,31 +126,31 @@ private def parse_multiple_json_values(json_str : String) : Array(JSON::Any)
   pos = 0
   str = json_str
 
-  while pos < str.bytesize
-    # Skip whitespace
-    while pos < str.bytesize && str[pos].whitespace?
+  while pos < str.size
+    # Skip whitespace (using character index, not byte index)
+    while pos < str.size && str[pos].whitespace?
       pos += 1
     end
 
-    break if pos >= str.bytesize
+    break if pos >= str.size
 
     # Check if this could be the start of a valid JSON value
     start_char = str[pos]
     value_start = pos
 
     unless valid_json_start?(start_char)
-      snippet = error_snippet(str, pos)
+      snippet = error_snippet_char(str, pos)
       raise JSONParseError.new("Unexpected trailing content", pos, snippet)
     end
 
-    # Determine the end of the current JSON value
+    # Determine the end of the current JSON value (using character indices)
     value_end = case start_char
                 when '"'
                   # String: find matching unescaped quote
-                  find_string_end(str, pos)
+                  find_string_end_char(str, pos)
                 when '{', '['
                   # Object/Array: find matching bracket
-                  find_bracket_end(str, pos)
+                  find_bracket_end_char(str, pos)
                 when 't'
                   pos + 4 # true
                 when 'f'
@@ -159,7 +159,7 @@ private def parse_multiple_json_values(json_str : String) : Array(JSON::Any)
                   pos + 4 # null
                 else
                   # Number: find end of number
-                  find_number_end(str, pos)
+                  find_number_end_char(str, pos)
                 end
 
     # Extract and parse the value
@@ -169,7 +169,7 @@ private def parse_multiple_json_values(json_str : String) : Array(JSON::Any)
       results << result
       pos = value_end
     rescue ex : JSON::ParseException
-      snippet = error_snippet(str, value_start)
+      snippet = error_snippet_char(str, value_start)
       raise JSONParseError.new("Failed to parse JSON value", value_start, snippet)
     end
   end
@@ -177,6 +177,87 @@ private def parse_multiple_json_values(json_str : String) : Array(JSON::Any)
   results
 end
 
+# Character-based versions for unicode-safe parsing
+private def find_string_end_char(str : String, start : Int32) : Int32
+  pos = start + 1 # Skip opening quote
+  while pos < str.size
+    if str[pos] == '\\'
+      pos += 2 # Skip escaped char
+    elsif str[pos] == '"'
+      return pos + 1
+    else
+      pos += 1
+    end
+  end
+  str.size
+end
+
+private def find_bracket_end_char(str : String, start : Int32) : Int32
+  open_bracket = str[start]
+  close_bracket = open_bracket == '{' ? '}' : ']'
+  depth = 0
+  in_string = false
+  pos = start
+
+  while pos < str.size
+    char = str[pos]
+    if in_string
+      if char == '\\'
+        pos += 1 # Skip next char
+      elsif char == '"'
+        in_string = false
+      end
+    else
+      case char
+      when '"'
+        in_string = true
+      when open_bracket
+        depth += 1
+      when close_bracket
+        depth -= 1
+        if depth == 0
+          return pos + 1
+        end
+      end
+    end
+    pos += 1
+  end
+
+  str.size
+end
+
+private def find_number_end_char(str : String, start : Int32) : Int32
+  pos = start
+  while pos < str.size
+    char = str[pos]
+    break unless char == '-' || char == '+' || char == '.' ||
+                 char == 'e' || char == 'E' || char.number?
+    pos += 1
+  end
+  pos
+end
+
+private def error_snippet_char(str : String, pos : Int32, context_chars : Int32 = 20) : String
+  start_pos = {0, pos - context_chars}.max
+  end_pos = {str.size, pos + context_chars}.min
+
+  snippet = String.build do |io|
+    io << "..." if start_pos > 0
+    io << str[start_pos...end_pos].gsub(/[\r\n\t]/) { |c|
+      case c
+      when "\r" then "\\r"
+      when "\n" then "\\n"
+      when "\t" then "\\t"
+      else           c
+      end
+    }
+    io << "..." if end_pos < str.size
+  end
+
+  snippet
+end
+
+# Legacy byte-based versions (kept for backward compatibility in tests)
 private def find_string_end(str : String, start : Int32) : Int32
   pos = start + 1 # Skip opening quote
   while pos < str.bytesize
