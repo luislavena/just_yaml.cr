@@ -57,7 +57,7 @@ Implements the YAML 1.2 specification with strict parsing and detailed error mes
 require "just_yaml"
 
 # Parse YAML to native Crystal types
-data = JustYAML.load(<<-YAML)
+result = JustYAML.load(<<-YAML)
 name: JustYAML
 version: 1.0
 features:
@@ -66,6 +66,8 @@ features:
   - round-trip support
 YAML
 
+# Cast to access hash keys
+data = result.as(Hash(String, JustYAML::Any))
 puts data["name"]     # => "JustYAML"
 puts data["version"]  # => 1.0
 ```
@@ -100,7 +102,7 @@ puts output
 ```crystal
 require "just_yaml"
 
-data = JustYAML.load(<<-YAML)
+result = JustYAML.load(<<-YAML)
 defaults: &defaults
   adapter: postgres
   host: localhost
@@ -114,8 +116,12 @@ production:
   database: prod_db
 YAML
 
-puts data["development"]["adapter"]  # => "postgres"
-puts data["production"]["database"]  # => "prod_db"
+data = result.as(Hash(String, JustYAML::Any))
+dev = data["development"].as(Hash(String, JustYAML::Any))
+prod = data["production"].as(Hash(String, JustYAML::Any))
+
+puts dev["adapter"]    # => "postgres"
+puts prod["database"]  # => "prod_db"
 ```
 
 ### Error handling
@@ -128,7 +134,7 @@ require "just_yaml"
 begin
   JustYAML.load("key: [unclosed")
 rescue ex : JustYAML::ParseError
-  puts ex.message  # => "Unexpected end of input at line 1, column 14"
+  puts ex.message  # => "Expected SequenceEnd, got StreamEnd at line 1, column 15"
 end
 ```
 
@@ -152,7 +158,8 @@ end
 ### Types
 
 ```crystal
-# The Any type represents resolved YAML values
+# The Any type alias represents resolved YAML values
+# Use .as() to cast to the expected type for access
 alias JustYAML::Any = Nil | Bool | Int64 | Float64 | String |
                       Array(Any) | Hash(String, Any)
 ```

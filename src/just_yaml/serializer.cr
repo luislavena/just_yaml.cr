@@ -71,11 +71,8 @@ module JustYAML
       when AST::ScalarStyle::Folded
         serialize_folded_scalar(value, io, indent)
       else # Plain
-        if needs_quoting?(value)
-          io << "\"" << escape_double_quoted(value) << "\""
-        else
-          io << value
-        end
+        # Trust the original plain style - don't re-quote for round-trip fidelity
+        io << value
       end
     end
 
@@ -86,30 +83,6 @@ module JustYAML
         .gsub("\n", "\\n")
         .gsub("\r", "\\r")
         .gsub("\t", "\\t")
-    end
-
-    private def needs_quoting?(value : String) : Bool
-      return true if value.empty?
-
-      # Check for special values that need quoting
-      special_values = ["null", "Null", "NULL", "~",
-                        "true", "True", "TRUE",
-                        "false", "False", "FALSE",
-                        ".inf", "-.inf", "+.inf",
-                        ".nan", ".NaN", ".NAN"]
-
-      return true if special_values.includes?(value)
-
-      # Check for indicators at start
-      first_char = value[0]?
-      return true if first_char.in?('&', '*', '!', '|', '>', '\'', '"', '%', '@', '`', '#', ',', '[', ']', '{', '}', '?', '-', ':')
-
-      # Check for special characters that require quoting
-      value.each_char do |char|
-        return true if char == ':' || char == '#' || char == '\n'
-      end
-
-      false
     end
 
     private def serialize_literal_scalar(value : String, io : IO, indent : Int32) : Nil
