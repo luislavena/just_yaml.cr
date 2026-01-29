@@ -43,8 +43,10 @@ module JustYAML
       had_directives = skip_directives_with_validation(after_document_end)
 
       # Check for explicit document start
+      doc_start_line = 0
       if check(TokenType::DocumentStart)
         doc.explicit_start = true
+        doc_start_line = @current_token.location.line
         advance
         skip_comments_and_newlines
       end
@@ -68,6 +70,17 @@ module JustYAML
       # Parse document content (if any)
       unless check(TokenType::StreamEnd) || check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
         doc.root = parse_node(0)
+
+        # Block mapping cannot start on the same line as document start marker
+        if doc.explicit_start && doc_start_line > 0
+          if root = doc.root
+            if root.is_a?(AST::MappingNode) && root.style == AST::CollectionStyle::Block
+              if root.start_location.line == doc_start_line
+                raise ParseError.new("Block mapping cannot start on the same line as document start", root.start_location)
+              end
+            end
+          end
+        end
 
         # After parsing a node, check for unexpected trailing content on the same line
         # This catches cases like "[ a, b, c ] ]" where extra content follows a flow collection
