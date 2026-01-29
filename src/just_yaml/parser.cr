@@ -149,6 +149,14 @@ module JustYAML
       # Skip newlines after anchor/tag (content may be on next line)
       skip_comments_and_newlines
 
+      # Anchor/tag on same line as block sequence indicator is invalid
+      # e.g., "&anchor - item" - the anchor must be on a separate line before the sequence
+      if (anchor || tag) && @current_token.location.line == props_line
+        if check(TokenType::SequenceEntry)
+          raise ParseError.new("Anchor/tag before block sequence entry must be on a separate line", @current_token.location)
+        end
+      end
+
       # If content is on a different line than the properties, use the content's column
       # This handles cases like:
       #   --- !<tag>
