@@ -1829,6 +1829,7 @@ module JustYAML
         current_indent = @current_token.location.column
         break if current_indent < entry_indent
 
+        entry_line = @current_token.location.line
         expect(TokenType::SequenceEntry)
         skip_whitespace_tokens
 
@@ -1842,6 +1843,12 @@ module JustYAML
         break if check(TokenType::StreamEnd) ||
                  check(TokenType::DocumentStart) ||
                  check(TokenType::DocumentEnd)
+
+        # Sequence entries must be on separate lines
+        # The current token line must be different from the entry line where we started
+        if check(TokenType::SequenceEntry) && @current_token.location.line == entry_line
+          raise ParseError.new("Sequence entry must be on a new line", @current_token.location)
+        end
       end
 
       sequence.end_location = @current_token.location
@@ -2707,6 +2714,16 @@ module JustYAML
       while check(TokenType::Newline) || check(TokenType::Comment)
         advance
       end
+    end
+
+    # Returns true if a newline was encountered
+    private def skip_comments_and_newlines_tracking : Bool
+      saw_newline = false
+      while check(TokenType::Newline) || check(TokenType::Comment)
+        saw_newline = true if check(TokenType::Newline)
+        advance
+      end
+      saw_newline
     end
 
     private def skip_whitespace_tokens : Nil
