@@ -7,6 +7,7 @@ module JustYAML
     @finished : Bool = false
     @flow_level : Int32 = 0                   # Track nesting level of flow collections
     @whitespace_before_current : Bool = false # Track if current position was preceded by whitespace
+    @in_block_mapping_value : Bool = false    # Track if we're in a block mapping value context
 
     def initialize(input : String)
       @reader = Char::Reader.new(input)
@@ -194,6 +195,8 @@ module JustYAML
       advance
       # Don't skip whitespace here - let the next next_token call handle it
       # This preserves the column position for proper tab handling
+      # Clear block mapping value context flag on newline
+      @in_block_mapping_value = false
       Token.new(TokenType::Newline, "", loc)
     end
 
@@ -210,6 +213,10 @@ module JustYAML
       end
 
       if is_value_indicator
+        # Set flag for block mapping value context (for quoted scalar indentation checking)
+        if @flow_level == 0
+          @in_block_mapping_value = true
+        end
         Token.new(TokenType::ValueIndicator, ":", loc)
       else
         # Scan as scalar (e.g., ":foo" or ":," becomes scalar value)
@@ -367,8 +374,8 @@ module JustYAML
               raise LexerError.new("Unterminated single-quoted string (document marker encountered)", loc)
             end
 
-            # Handle line folding
-            str << fold_single_quoted_line
+            # Handle line folding with indentation validation
+            str << fold_quoted_line_with_indent_check(loc.column, loc)
           elsif char == ' ' || char == '\t'
             # Track trailing whitespace
             trailing_ws << advance
@@ -423,7 +430,7 @@ module JustYAML
               raise LexerError.new("Unterminated double-quoted string (document marker encountered)", loc)
             end
 
-            str << fold_double_quoted_line
+            str << fold_quoted_line_with_indent_check(loc.column, loc)
           elsif char == ' ' || char == '\t'
             # Track trailing whitespace
             trailing_ws << advance
@@ -479,7 +486,49 @@ module JustYAML
       result
     end
 
-    # Aliases for clarity
+    # Handle line folding with indentation validation
+    # In block context, continuation lines must be more indented than column 1
+    private def fold_quoted_line_with_indent_check(min_indent : Int32, string_loc : Location) : String
+      result = String.build do |str|
+        empty_lines = 0
+
+        loop do
+          # Skip leading whitespace
+          while current_char == ' ' || current_char == '\t'
+            advance
+          end
+
+          if current_char == '\n'
+            # Empty line - counts as a literal newline
+            empty_lines += 1
+            advance
+          else
+            break
+          end
+        end
+
+        # In block mapping value context, continuation lines must be more indented than column 1
+        # This catches cases like:
+        #   quoted: "a
+        #   b" <- column 1 is invalid because it's not more indented than the mapping key
+        # But at document root, column 1 is valid (e.g., --- "a\nb")
+        if @in_block_mapping_value && @column == 1 && !at_end? && current_char != '"' && current_char != '\''
+          raise LexerError.new(
+            "Wrong indentation in multiline quoted scalar: continuation must be indented",
+            string_loc
+          )
+        end
+
+        if empty_lines > 0
+          str << "\n" * empty_lines
+        else
+          str << " "
+        end
+      end
+      result
+    end
+
+    # Aliases for clarity (kept for any remaining uses)
     private def fold_single_quoted_line : String
       fold_quoted_line
     end
