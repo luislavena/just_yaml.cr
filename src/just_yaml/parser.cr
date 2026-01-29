@@ -1833,9 +1833,12 @@ module JustYAML
       entry_indent = @current_token.location.column
 
       while check(TokenType::SequenceEntry)
-        # Verify indentation
+        # Verify indentation - must match exactly
         current_indent = @current_token.location.column
         break if current_indent < entry_indent
+        if current_indent > entry_indent
+          raise ParseError.new("Wrong indentation for sequence entry", @current_token.location)
+        end
 
         entry_line = @current_token.location.line
         expect(TokenType::SequenceEntry)
