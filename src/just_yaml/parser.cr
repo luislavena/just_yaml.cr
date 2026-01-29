@@ -555,10 +555,9 @@ module JustYAML
           end
         end
 
-        # Skip comments (they don't count as content)
+        # Comments end the plain scalar - no continuation after a comment
         if check(TokenType::Comment)
-          advance
-          next
+          break
         end
 
         # Check if we should stop
