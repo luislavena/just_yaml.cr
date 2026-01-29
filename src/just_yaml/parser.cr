@@ -774,10 +774,11 @@ module JustYAML
       key : AST::Node = first_key
 
       loop do
+        key_line = key.start_location.line
         expect(TokenType::ValueIndicator)
         skip_whitespace_tokens
 
-        value = parse_mapping_value(key_indent)
+        value = parse_mapping_value(key_indent, key_line)
         mapping.entries << AST::MappingEntry.new(key: key, value: value)
 
         skip_comments_and_newlines
@@ -1468,12 +1469,12 @@ module JustYAML
       mapping
     end
 
-    private def parse_mapping_value(key_indent : Int32) : AST::Node?
+    private def parse_mapping_value(key_indent : Int32, parent_key_line : Int32? = nil) : AST::Node?
       # Check for anchor/tag/alias on value
       anchor, tag, alias_node = parse_value_properties
       return alias_node if alias_node
 
-      node = parse_mapping_value_content(key_indent, anchor, tag)
+      node = parse_mapping_value_content(key_indent, anchor, tag, parent_key_line)
 
       # If node is nil but we have an anchor or tag, create an empty scalar
       # This handles cases like "a: &anchor" where the value is null
@@ -1535,13 +1536,18 @@ module JustYAML
       {anchor, tag, nil}
     end
 
-    private def parse_mapping_value_content(key_indent : Int32, anchor : String?, tag : String?) : AST::Node?
+    private def parse_mapping_value_content(key_indent : Int32, anchor : String?, tag : String?, parent_key_line : Int32? = nil) : AST::Node?
       case @current_token.type
       when TokenType::Scalar
         scalar = parse_scalar
         skip_whitespace_tokens
 
         if check(TokenType::ValueIndicator)
+          # Nested mapping as value - not allowed on same line as parent key
+          # e.g., "a: b: c" is invalid, but "a:\n  b: c" is valid
+          if parent_key_line && scalar.start_location.line == parent_key_line
+            raise ParseError.new("Nested mapping not allowed on same line as parent mapping", scalar.start_location)
+          end
           # Nested mapping inline
           parse_block_mapping(scalar, key_indent)
         else
