@@ -1855,10 +1855,16 @@ module JustYAML
     private def parse_sequence_item_content(entry_indent : Int32) : AST::Node
       case @current_token.type
       when TokenType::Scalar
+        key_start_line = @current_token.location.line
+        key_start_loc = @current_token.location
         scalar = parse_scalar
         skip_whitespace_tokens
 
         if check(TokenType::ValueIndicator)
+          # Implicit keys cannot span multiple lines
+          if @current_token.location.line != key_start_line
+            raise ParseError.new("Implicit key cannot span multiple lines", key_start_loc)
+          end
           # This is actually a mapping
           parse_block_mapping(scalar, entry_indent)
         else
@@ -1886,9 +1892,15 @@ module JustYAML
         # After tag/anchor, parse the actual content
         case @current_token.type
         when TokenType::Scalar
+          key_start_line = @current_token.location.line
+          key_start_loc = @current_token.location
           scalar = parse_scalar
           skip_whitespace_tokens
           if check(TokenType::ValueIndicator)
+            # Implicit keys cannot span multiple lines
+            if @current_token.location.line != key_start_line
+              raise ParseError.new("Implicit key cannot span multiple lines", key_start_loc)
+            end
             # Tagged/anchored key - this is a mapping
             mapping = parse_block_mapping(scalar, tag_col)
             # Apply tag/anchor to the scalar key, not the mapping
