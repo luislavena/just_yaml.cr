@@ -2444,6 +2444,8 @@ module JustYAML
 
       # Collect lines with their raw content (preserving indentation info)
       lines = [] of {content: String, indent: Int32, is_empty: Bool}
+      # Track whitespace amounts on empty lines before first content (for validation)
+      pending_empty_line_whitespace = [] of Int32
       # Explicit indent specifies the additional indentation relative to parent context
       # Content indent is calculated as parent_indent + explicit_indent (in column terms)
       # If no explicit indent, auto-detect from first content line
@@ -2467,6 +2469,10 @@ module JustYAML
             lines << {content: extra_ws, indent: ws_col, is_empty: false}
           else
             lines << {content: "", indent: 0, is_empty: true}
+            # Track whitespace on empty lines before content indentation is established
+            if content_indent < 0 && ws_col > 1
+              pending_empty_line_whitespace << ws_col
+            end
           end
           advance
         elsif check(TokenType::Scalar) || check(TokenType::Comment) ||
@@ -2505,6 +2511,16 @@ module JustYAML
           # Auto-detect content indentation from first content line
           if content_indent < 0
             content_indent = line_col
+            # Validate that no preceding empty lines had more whitespace than content indent
+            pending_empty_line_whitespace.each do |ws|
+              if ws > content_indent
+                raise ParseError.new(
+                  "Block scalar has wrong indented line: preceding whitespace-only line has more spaces than content",
+                  loc
+                )
+              end
+            end
+            pending_empty_line_whitespace.clear
           end
 
           # Check if we've dedented below auto-detected content level
