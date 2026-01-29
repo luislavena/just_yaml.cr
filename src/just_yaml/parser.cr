@@ -2096,10 +2096,16 @@ module JustYAML
 
       # Parse the first node
       first_node = parse_flow_node
-      skip_flow_whitespace
+      key_end_line = first_node.end_location.line
+      newline_after_key = skip_flow_whitespace
 
       # Check if this is an implicit mapping (key: value)
+      # Implicit keys cannot span multiple lines in flow context
       if check(TokenType::ValueIndicator)
+        # Check if key and : are on different lines
+        if newline_after_key || @current_token.location.line != key_end_line
+          raise ParseError.new("Implicit key cannot span multiple lines in flow context", first_node.start_location)
+        end
         advance
         skip_flow_whitespace
 
@@ -2120,6 +2126,9 @@ module JustYAML
 
       # Also handle case where lexer combined :value into a scalar
       if check(TokenType::Scalar) && @current_token.value.starts_with?(":")
+        if newline_after_key || @current_token.location.line != key_end_line
+          raise ParseError.new("Implicit key cannot span multiple lines in flow context", first_node.start_location)
+        end
         scalar_value = @current_token.value[1..]
         advance
 
@@ -2655,10 +2664,14 @@ module JustYAML
       # Currently no whitespace tokens - handled by lexer
     end
 
-    private def skip_flow_whitespace : Nil
+    # Returns true if a newline was crossed
+    private def skip_flow_whitespace : Bool
+      newline_crossed = false
       while check(TokenType::Newline) || check(TokenType::Comment)
+        newline_crossed = true if check(TokenType::Newline)
         advance
       end
+      newline_crossed
     end
   end
 end
