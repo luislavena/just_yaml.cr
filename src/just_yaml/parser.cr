@@ -164,6 +164,11 @@ module JustYAML
 
       # Handle alias reference
       if check(TokenType::Alias)
+        # Anchor and alias are mutually exclusive
+        if anchor
+          raise ParseError.new("Cannot have both anchor and alias on same node", @current_token.location)
+        end
+
         alias_name = @current_token.value
         loc = @current_token.location
         advance
@@ -795,6 +800,11 @@ module JustYAML
           end
           key.tag = next_key_tag if next_key_tag
         when TokenType::Alias
+          # Anchor and alias are mutually exclusive
+          if next_key_anchor
+            raise ParseError.new("Cannot have both anchor and alias on same node", @current_token.location)
+          end
+
           # Alias as mapping key
           break if entry_start != key_indent
 
@@ -1460,6 +1470,11 @@ module JustYAML
 
       # Handle alias reference
       if check(TokenType::Alias)
+        # Anchor and alias are mutually exclusive
+        if anchor
+          raise ParseError.new("Cannot have both anchor and alias on same node", @current_token.location)
+        end
+
         alias_name = @current_token.value
         loc = @current_token.location
         advance

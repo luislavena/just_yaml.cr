@@ -5,7 +5,8 @@ module JustYAML
     @column : Int32 = 1
     @started : Bool = false
     @finished : Bool = false
-    @flow_level : Int32 = 0 # Track nesting level of flow collections
+    @flow_level : Int32 = 0                   # Track nesting level of flow collections
+    @whitespace_before_current : Bool = false # Track if current position was preceded by whitespace
 
     def initialize(input : String)
       @reader = Char::Reader.new(input)
@@ -17,7 +18,14 @@ module JustYAML
         return Token.new(TokenType::StreamStart, "", current_location)
       end
 
-      skip_whitespace
+      # Track if whitespace was skipped (needed for comment detection)
+      # Also track if we started at column 1 (beginning of line)
+      at_line_start = @column == 1
+      whitespace_skipped = skip_whitespace
+      # If we skipped whitespace here, reset the flag (it will be set again if needed)
+      if whitespace_skipped
+        @whitespace_before_current = false
+      end
 
       if at_end?
         return stream_end_token
@@ -68,7 +76,14 @@ module JustYAML
       when '"'
         scan_double_quoted_scalar
       when '#'
-        scan_comment
+        # Comment only if at start of line or preceded by whitespace
+        if at_line_start || whitespace_skipped || @whitespace_before_current
+          @whitespace_before_current = false
+          scan_comment
+        else
+          # # without preceding whitespace is part of plain scalar or error
+          raise LexerError.new("Comment must be preceded by whitespace", current_location)
+        end
       when '&'
         scan_anchor
       when '*'
@@ -143,22 +158,27 @@ module JustYAML
       Location.new(@line, @column)
     end
 
-    private def skip_whitespace : Nil
+    # Returns true if any whitespace was skipped, false otherwise
+    private def skip_whitespace : Bool
       # In flow context, tabs are allowed as whitespace
       # In block context, only spaces are valid indentation
       # Track start column to handle mid-line whitespace vs indentation
       start_col = @column
+      skipped = false
       if @flow_level > 0 || start_col > 1
         # Flow context or mid-line: skip both spaces and tabs together
         while current_char == ' ' || current_char == '\t'
           advance
+          skipped = true
         end
       else
         # Block context at start of line: only skip spaces for indentation
         while current_char == ' '
           advance
+          skipped = true
         end
       end
+      skipped
     end
 
     private def stream_end_token : Token
@@ -243,6 +263,8 @@ module JustYAML
               str << advance
             else
               # Comment starts here - don't include trailing whitespace
+              # Mark that the # was preceded by whitespace for the next token call
+              @whitespace_before_current = true
               stopped_for_comment = true
               break
             end
