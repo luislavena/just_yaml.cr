@@ -3,6 +3,9 @@ module JustYAML
     @lexer : Lexer
     @current_token : Token
     @anchors : Hash(String, AST::Node) = {} of String => AST::Node
+    # Track the containing block indent for flow collection indentation validation
+    # Flow content continuation lines must be more indented than this
+    @flow_block_indent : Int32 = -1
 
     def initialize(input : String)
       @lexer = Lexer.new(input)
@@ -229,6 +232,7 @@ module JustYAML
       when TokenType::Scalar
         parse_mapping_or_scalar_with_properties(min_indent, entry_start_col, anchor, tag)
       when TokenType::SequenceStart
+        # Top-level flow collections don't have block indent restrictions
         node = parse_flow_sequence
         apply_node_properties(node, anchor, tag)
         skip_whitespace_tokens
@@ -241,6 +245,7 @@ module JustYAML
         end
         node
       when TokenType::MappingStart
+        # Top-level flow collections don't have block indent restrictions
         node = parse_flow_mapping
         apply_node_properties(node, anchor, tag)
         skip_whitespace_tokens
@@ -1555,9 +1560,17 @@ module JustYAML
           parse_multiline_plain_scalar_in_mapping(scalar, key_indent)
         end
       when TokenType::SequenceStart
-        parse_flow_sequence
+        saved_indent = @flow_block_indent
+        @flow_block_indent = key_indent
+        node = parse_flow_sequence
+        @flow_block_indent = saved_indent
+        node
       when TokenType::MappingStart
-        parse_flow_mapping
+        saved_indent = @flow_block_indent
+        @flow_block_indent = key_indent
+        node = parse_flow_mapping
+        @flow_block_indent = saved_indent
+        node
       when TokenType::BlockScalarHeader
         parse_block_scalar(key_indent)
       when TokenType::SequenceEntry
@@ -1620,9 +1633,17 @@ module JustYAML
           fold_multiline_plain_scalar(scalar, mode: MultilineScalarMode::Mapping, key_indent: key_indent)
         end
       when TokenType::SequenceStart
-        parse_flow_sequence
+        saved_indent = @flow_block_indent
+        @flow_block_indent = key_indent
+        node = parse_flow_sequence
+        @flow_block_indent = saved_indent
+        node
       when TokenType::MappingStart
-        parse_flow_mapping
+        saved_indent = @flow_block_indent
+        @flow_block_indent = key_indent
+        node = parse_flow_mapping
+        @flow_block_indent = saved_indent
+        node
       when TokenType::Alias
         # Alias can be a mapping key: *alias : value
         alias_name = @current_token.value
@@ -2074,7 +2095,7 @@ module JustYAML
       sequence.style = AST::CollectionStyle::Flow
 
       expect(TokenType::SequenceStart)
-      skip_flow_whitespace
+      skip_flow_whitespace_with_indent_check
 
       # Reject leading comma
       if check(TokenType::FlowSeparator)
@@ -2086,11 +2107,11 @@ module JustYAML
           item = parse_flow_sequence_item
           sequence.items << item
 
-          skip_flow_whitespace
+          skip_flow_whitespace_with_indent_check
 
           if check(TokenType::FlowSeparator)
             advance
-            skip_flow_whitespace
+            skip_flow_whitespace_with_indent_check
             # Allow trailing comma before ]
             break if check(TokenType::SequenceEnd)
             # Reject double comma (empty element in middle)
@@ -2758,6 +2779,22 @@ module JustYAML
       while check(TokenType::Newline) || check(TokenType::Comment)
         newline_crossed = true if check(TokenType::Newline)
         advance
+      end
+      newline_crossed
+    end
+
+    # Skip flow whitespace and validate indentation when crossing newlines
+    # Flow content continuation must be more indented than the containing block
+    private def skip_flow_whitespace_with_indent_check : Bool
+      newline_crossed = false
+      while check(TokenType::Newline) || check(TokenType::Comment)
+        newline_crossed = true if check(TokenType::Newline)
+        advance
+      end
+      if newline_crossed && !check(TokenType::StreamEnd) && @flow_block_indent >= 0
+        if @current_token.location.column <= @flow_block_indent
+          raise ParseError.new("Wrong indentation in flow collection", @current_token.location)
+        end
       end
       newline_crossed
     end
