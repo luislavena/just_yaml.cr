@@ -1108,12 +1108,34 @@ module JustYAML
         skip_whitespace_tokens
 
         # Parse the key (can be any node, or implicit null)
-        key : AST::Node = if check(TokenType::Newline) || check(TokenType::ValueIndicator)
-          # Null key
+        key : AST::Node = if check(TokenType::ValueIndicator)
+          # Immediate null key (? :)
           null_key = AST::ScalarNode.new("")
           null_key.start_location = @current_token.location
           null_key.end_location = @current_token.location
           null_key
+        elsif check(TokenType::Newline) || check(TokenType::Comment)
+          # Key might be on next line or be null
+          skip_comments_and_newlines
+
+          # Check what comes next
+          if check(TokenType::ValueIndicator) || check(TokenType::StreamEnd) ||
+             check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
+            # Null key
+            null_key = AST::ScalarNode.new("")
+            null_key.start_location = @current_token.location
+            null_key.end_location = @current_token.location
+            null_key
+          elsif @current_token.location.column >= key_indent
+            # Content on next line at same or greater indentation - this is the key
+            parse_explicit_key_value(key_indent)
+          else
+            # Dedented - null key
+            null_key = AST::ScalarNode.new("")
+            null_key.start_location = @current_token.location
+            null_key.end_location = @current_token.location
+            null_key
+          end
         else
           parse_explicit_key_value(key_indent)
         end
@@ -1796,6 +1818,9 @@ module JustYAML
       when TokenType::SequenceEntry
         # Nested sequence
         parse_block_sequence(entry_indent)
+      when TokenType::KeyIndicator
+        # Explicit key mapping (compact form)
+        parse_block_mapping_with_explicit_key(@current_token.location.column)
       when TokenType::BlockScalarHeader
         parse_block_scalar(entry_indent)
       when TokenType::Tag, TokenType::Anchor
