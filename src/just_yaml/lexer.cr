@@ -798,7 +798,7 @@ module JustYAML
       advance # consume *
 
       # * followed by whitespace or flow indicator is not an alias - it's a literal * in content
-      # Only * followed by valid anchor/alias name characters is an alias
+      # This handles cases like "* bullet" in block scalars where * is literal content
       if at_end? || !valid_anchor_alias_char?(current_char)
         # Not an alias - return * as a scalar
         # Continue scanning the rest as a plain scalar

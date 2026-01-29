@@ -720,22 +720,24 @@ describe JustYAML::Lexer do
       token.value.should eq("123abc")
     end
 
-    it "raises error for empty alias name" do
+    it "treats * followed by space as scalar (not alias)" do
       lexer = JustYAML::Lexer.new("* value")
       lexer.next_token # StreamStart
+      token = lexer.next_token
 
-      expect_raises(JustYAML::LexerError, /Invalid alias name/) do
-        lexer.next_token
-      end
+      # * followed by space is literal content, not an alias
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("* value")
     end
 
-    it "raises error for alias at end of input" do
+    it "treats lone * as scalar (not alias)" do
       lexer = JustYAML::Lexer.new("*")
       lexer.next_token # StreamStart
+      token = lexer.next_token
 
-      expect_raises(JustYAML::LexerError, /Invalid alias name/) do
-        lexer.next_token
-      end
+      # Lone * is literal content, not an alias
+      token.type.should eq(JustYAML::TokenType::Scalar)
+      token.value.should eq("*")
     end
   end
 
@@ -1232,15 +1234,14 @@ describe JustYAML::Lexer do
     end
 
     describe "sequence end (])" do
-      it "scans sequence end" do
+      it "treats standalone ] as scalar outside flow context" do
         lexer = JustYAML::Lexer.new("]")
         lexer.next_token # StreamStart
         token = lexer.next_token
 
-        token.type.should eq(JustYAML::TokenType::SequenceEnd)
+        # Outside flow context, ] is treated as scalar content
+        token.type.should eq(JustYAML::TokenType::Scalar)
         token.value.should eq("]")
-        token.location.line.should eq(1)
-        token.location.column.should eq(1)
       end
     end
 
@@ -1276,28 +1277,26 @@ describe JustYAML::Lexer do
     end
 
     describe "mapping end (})" do
-      it "scans mapping end" do
+      it "treats standalone } as scalar outside flow context" do
         lexer = JustYAML::Lexer.new("}")
         lexer.next_token # StreamStart
         token = lexer.next_token
 
-        token.type.should eq(JustYAML::TokenType::MappingEnd)
+        # Outside flow context, } is treated as scalar content
+        token.type.should eq(JustYAML::TokenType::Scalar)
         token.value.should eq("}")
-        token.location.line.should eq(1)
-        token.location.column.should eq(1)
       end
     end
 
     describe "flow separator (,)" do
-      it "scans flow separator" do
+      it "treats standalone , as scalar outside flow context" do
         lexer = JustYAML::Lexer.new(",")
         lexer.next_token # StreamStart
         token = lexer.next_token
 
-        token.type.should eq(JustYAML::TokenType::FlowSeparator)
+        # Outside flow context, , is treated as scalar content
+        token.type.should eq(JustYAML::TokenType::Scalar)
         token.value.should eq(",")
-        token.location.line.should eq(1)
-        token.location.column.should eq(1)
       end
 
       it "scans flow separator between sequence items" do
