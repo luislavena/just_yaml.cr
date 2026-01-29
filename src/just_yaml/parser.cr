@@ -1561,7 +1561,12 @@ module JustYAML
       when TokenType::BlockScalarHeader
         parse_block_scalar(key_indent)
       when TokenType::SequenceEntry
-        # Inline sequence entry (rare but valid)
+        # Block sequence entry on same line as value indicator is only valid for explicit key mappings
+        # e.g., "key: - a" is invalid; "? key\n: - a" is valid
+        # parent_key_line is set for implicit keys, nil for explicit keys
+        if parent_key_line
+          raise ParseError.new("Block sequence entry must start on a new line", @current_token.location)
+        end
         parse_block_sequence(key_indent)
       when TokenType::Newline, TokenType::Comment
         # Value on next line (block collection)
