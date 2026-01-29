@@ -804,6 +804,11 @@ module JustYAML
           while !at_end? && !tag_terminator?(current_char)
             str << advance
           end
+          # Comma immediately after tag is invalid in block context (no whitespace between)
+          # In flow context, comma is a valid separator after tag
+          if !at_end? && current_char == ',' && @flow_level == 0
+            raise LexerError.new("Invalid comma in tag - tags must be followed by whitespace", loc)
+          end
         elsif current_char == '<'
           # Verbatim tag: !<uri>
           str << advance
@@ -822,6 +827,11 @@ module JustYAML
           # Tag name must start with valid word char (alphanumeric or -)
           while !at_end? && !tag_terminator?(current_char)
             str << advance
+          end
+          # Comma immediately after tag is invalid in block context (no whitespace between)
+          # In flow context, comma is a valid separator after tag
+          if !at_end? && current_char == ',' && @flow_level == 0
+            raise LexerError.new("Invalid comma in tag - tags must be followed by whitespace", loc)
           end
         else
           # Invalid tag start character (like !" or !#) - treat as scalar
