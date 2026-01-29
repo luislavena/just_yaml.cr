@@ -893,6 +893,23 @@ module JustYAML
         when TokenType::SequenceEntry
           # Block sequence at same level - not part of this mapping
           break
+        when TokenType::ValueIndicator
+          # Null key entry at same level
+          break if entry_start != key_indent
+
+          # Create null key
+          null_key = AST::ScalarNode.new("")
+          null_key.start_location = @current_token.location
+          null_key.end_location = @current_token.location
+
+          # Apply any anchor/tag that was parsed
+          if next_key_anchor
+            null_key.anchor = next_key_anchor
+            @anchors[next_key_anchor] = null_key
+          end
+          null_key.tag = next_key_tag if next_key_tag
+
+          key = null_key
         else
           break
         end
@@ -1825,6 +1842,9 @@ module JustYAML
           case @current_token.type
           when TokenType::SequenceEntry
             parse_block_sequence(next_col)
+          when TokenType::KeyIndicator
+            # Explicit key mapping
+            parse_block_mapping_with_explicit_key(next_col)
           when TokenType::Scalar
             scalar = parse_scalar
             skip_whitespace_tokens
@@ -1850,6 +1870,9 @@ module JustYAML
                      end
                    when TokenType::SequenceEntry
                      parse_block_sequence(next_col)
+                   when TokenType::KeyIndicator
+                     # Tagged/anchored explicit key mapping
+                     parse_block_mapping_with_explicit_key(next_col)
                    when TokenType::ValueIndicator
                      # Tagged null key mapping - parse as mapping starting with tagged null key
                      parse_mapping_with_tagged_null_key(next_col, tag, anchor)
