@@ -57,6 +57,14 @@ module JustYAML
         end
       end
 
+      # After the first document, require explicit start marker to begin a new document
+      # (unless we're after an explicit document end)
+      if !after_document_end && !doc.explicit_start
+        if !check(TokenType::StreamEnd) && !check(TokenType::DocumentEnd)
+          raise ParseError.new("Unexpected content after document - use '---' to start a new document", @current_token.location)
+        end
+      end
+
       # Parse document content (if any)
       unless check(TokenType::StreamEnd) || check(TokenType::DocumentStart) || check(TokenType::DocumentEnd)
         doc.root = parse_node(0)
