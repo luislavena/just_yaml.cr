@@ -527,12 +527,23 @@ module JustYAML
 
         # At same indentation, continue if it's a plain scalar or indicator-like content
         if check(TokenType::Directive)
-          # Directive at same indentation is continuation content
-          # (it's only a real directive if at start of stream or after document end)
-          empty_line_count = append_continuation_line(lines, @current_token.value, empty_line_count)
+          directive_loc = @current_token.location
+          directive_value = @current_token.value
+          # Directive at same indentation might be continuation content
+          # But first, peek ahead to see if it's followed by document start
           advance
-          # Skip the newline after the directive
-          advance if check(TokenType::Newline)
+          while check(TokenType::Newline)
+            advance
+          end
+          if check(TokenType::DocumentStart)
+            # This looks like a directive context without proper document end marker
+            raise ParseError.new(
+              "Directive requires explicit document end marker",
+              directive_loc
+            )
+          end
+          # Not followed by document start, so treat as scalar content
+          empty_line_count = append_continuation_line(lines, directive_value, empty_line_count)
           next
         end
 
@@ -2226,6 +2237,11 @@ module JustYAML
         if check(TokenType::Directive)
           directive_value = @current_token.value
           directive_loc = @current_token.location
+
+          # Directives can only appear at the start of stream or after explicit document end
+          unless after_document_end_or_first
+            raise ParseError.new("Directive requires explicit document end marker", directive_loc)
+          end
 
           # Check for duplicate %YAML directive
           if directive_value.starts_with?("%YAML")
