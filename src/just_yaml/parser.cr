@@ -1998,8 +1998,12 @@ module JustYAML
           if check(TokenType::FlowSeparator)
             advance
             skip_flow_whitespace
-            # Allow trailing comma
+            # Allow trailing comma before ]
             break if check(TokenType::SequenceEnd)
+            # Reject double comma (empty element in middle)
+            if check(TokenType::FlowSeparator)
+              raise ParseError.new("Unexpected extra comma in flow sequence", @current_token.location)
+            end
           else
             break
           end
