@@ -676,29 +676,46 @@ module JustYAML
 
     # Consume tokens on a continuation line and return as literal text
     # In multiline plain scalar context, indicators become literal characters
+    # Returns nil if line contains a mapping pattern (key: value)
     private def consume_plain_scalar_continuation_line : String?
       parts = [] of String
       start_line = @current_token.location.line
+      last_was_scalar = false
+      first_token_loc = @current_token.location
 
       while @current_token.location.line == start_line
         case @current_token.type
         when TokenType::Scalar
           parts << @current_token.value
+          last_was_scalar = true
           advance
         when TokenType::Anchor
           parts << "&#{@current_token.value}"
+          last_was_scalar = false
           advance
         when TokenType::Alias
           parts << "*#{@current_token.value}"
+          last_was_scalar = false
           advance
         when TokenType::Tag
           parts << @current_token.value
+          last_was_scalar = false
           advance
         when TokenType::ValueIndicator
+          # If we just saw a scalar, this looks like a mapping pattern (key: value)
+          # This is invalid in multiline plain scalar context
+          if last_was_scalar
+            raise ParseError.new(
+              "Mapping not allowed in multiline plain scalar context",
+              first_token_loc
+            )
+          end
           parts << ":"
+          last_was_scalar = false
           advance
         when TokenType::KeyIndicator
           parts << "?"
+          last_was_scalar = false
           advance
         when TokenType::Newline, TokenType::Comment, TokenType::StreamEnd,
              TokenType::DocumentStart, TokenType::DocumentEnd
