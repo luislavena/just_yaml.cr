@@ -1983,6 +1983,11 @@ module JustYAML
       expect(TokenType::SequenceStart)
       skip_flow_whitespace
 
+      # Reject leading comma
+      if check(TokenType::FlowSeparator)
+        raise ParseError.new("Unexpected comma at beginning of flow sequence", @current_token.location)
+      end
+
       unless check(TokenType::SequenceEnd)
         loop do
           item = parse_flow_sequence_item
@@ -2227,7 +2232,12 @@ module JustYAML
 
       node = case @current_token.type
              when TokenType::Scalar
-               parse_scalar
+               scalar = parse_scalar
+               # Reject indicator-only plain scalars in flow context
+               if scalar.style == AST::ScalarStyle::Plain && (scalar.value == "-" || scalar.value == "?")
+                 raise ParseError.new("Invalid plain scalar '#{scalar.value}' in flow context", scalar.start_location)
+               end
+               scalar
              when TokenType::SequenceStart
                parse_flow_sequence
              when TokenType::MappingStart
