@@ -2220,9 +2220,28 @@ module JustYAML
 
     private def skip_directives_with_validation(after_document_end_or_first : Bool) : Bool
       had_directives = false
+      had_yaml_directive = false
 
       while check(TokenType::Directive) || check(TokenType::Newline) || check(TokenType::Comment)
         if check(TokenType::Directive)
+          directive_value = @current_token.value
+          directive_loc = @current_token.location
+
+          # Check for duplicate %YAML directive
+          if directive_value.starts_with?("%YAML")
+            if had_yaml_directive
+              raise ParseError.new("Duplicate %YAML directive", directive_loc)
+            end
+            had_yaml_directive = true
+
+            # Validate %YAML directive format: %YAML <major>.<minor> [# comment]
+            # Only "1.0", "1.1", "1.2" are valid, but we just check format
+            # Allow optional comment after the version number
+            unless directive_value =~ /\A%YAML\s+\d+\.\d+(\s+#.*)?\s*\z/
+              raise ParseError.new("Invalid %YAML directive format", directive_loc)
+            end
+          end
+
           had_directives = true
         end
         advance
